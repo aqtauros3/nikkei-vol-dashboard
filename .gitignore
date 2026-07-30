@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# secrets / env（有料フェーズで J-Quants の鍵などを置く場合）
+.env
+*.key
+
+# 生データキャッシュ（history はコミットするが raw は除外）
+data/raw/*
+!data/raw/.gitkeep
+
+# OS / editor
+.DS_Store
+.vscode/
+*.log
+
+# 注意: data/history/*.csv と docs/index.html は「コミットする」ため除外しない

@@ -1,0 +1,43 @@
+name: nightly-dashboard
+
+# 21:00 JST = 12:00 UTC（平日）。GitHub の cron は UTC 指定。
+# 高負荷時に数十分ずれることがあるため 21:00〜24:00 の運用想定なら許容範囲。
+on:
+  schedule:
+    - cron: "0 12 * * 1-5"
+  workflow_dispatch: {}   # 手動実行も可
+
+permissions:
+  contents: write         # history CSV と docs/index.html をコミットするため
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run pipeline
+        run: python run_local.py
+
+      - name: Commit updated data & dashboard
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/history docs
+          if git diff --cached --quiet; then
+            echo "変更なし"
+          else
+            git commit -m "chore: nightly update [skip ci]"
+            git push
+          fi
+
+# 公開方法（初回のみ手動）:
+#   リポジトリ Settings > Pages > Source: "Deploy from a branch"
+#   Branch: main / フォルダ: /docs を選択。以後 docs/index.html への push で自動更新。
