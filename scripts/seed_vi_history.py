@@ -18,12 +18,19 @@
     2023-08-02,21.89
     ...
 
-■ B) investing.com 形式
+■ B) investing.com 形式（英語版）
     https://www.investing.com/indices/nikkei-volatility-index-historical-data
     画面右上の「ダウンロード」から取得。ヘッダ行に "Price" を含む。
 
     Date,Price,Open,High,Low,Vol.,Change %
     "Aug 01, 2024","25.34","24.80","25.90","24.50","","0.21%"
+    ...
+
+■ B') investing.com 形式（日本語版）★ダウンロードしたファイルはこれ
+    同サイトの日本語ページからダウンロードした場合。列名が日本語。
+
+    "日付","終値","始値","高値","安値","出来高","変化率 %"
+    "2024-01-04","22.15","21.90","22.80","21.80","","0.00%"
     ...
 
 ■ C) stooq 形式
@@ -60,34 +67,50 @@ _VI_MAX = 200.0
 
 def _detect_format(df_raw: pd.DataFrame) -> str:
     """入力 CSV のフォーマットを列名から自動判定。"""
-    cols = {c.strip().lower() for c in df_raw.columns}
-    if "price" in cols and "change %" in cols.difference({"price"}):
+    cols_raw = [c.strip() for c in df_raw.columns]
+    cols = {c.lower() for c in cols_raw}
+
+    # 日本語版 investing.com: 「日付」「終値」「変化率 %」
+    if "日付" in cols_raw and "終値" in cols_raw:
+        return "investing_ja"
+    # 英語版 investing.com: "price" + "change %"
+    if "price" in cols and "change %" in cols:
         return "investing"
-    if ("close" in cols or "close" in cols) and "open" in cols:
+    # stooq / OHLC 形式
+    if "close" in cols and "open" in cols:
         return "stooq"
+    # シンプル date,vi
     if "vi" in cols and "date" in cols:
         return "simple"
-    # date + 2列目が数値なら simple とみなす
     if "date" in cols and len(df_raw.columns) == 2:
         return "simple"
     return "unknown"
 
 
+def _clean_num(series: pd.Series) -> pd.Series:
+    """クォート・カンマを除去して numeric に変換。"""
+    return pd.to_numeric(
+        series.astype(str).str.replace('"', "").str.replace(",", "").str.strip(),
+        errors="coerce",
+    )
+
+
 def _load_investing(df_raw: pd.DataFrame) -> pd.Series:
-    """investing.com 形式を正規化。"""
+    """investing.com 英語版を正規化。日付は "Aug 01, 2024" 形式。"""
     df = df_raw.copy()
     df.columns = df.columns.str.strip().str.lower()
-
-    # "Aug 01, 2024" 形式の日付をパース
     dates = pd.to_datetime(df["date"].str.strip().str.replace('"', ""), format="mixed")
-    prices = (
-        df["price"]
-        .astype(str)
-        .str.replace('"', "")
-        .str.replace(",", "")
-        .str.strip()
+    s = pd.Series(_clean_num(df["price"]).values, index=dates, name="vi")
+    return s
+
+
+def _load_investing_ja(df_raw: pd.DataFrame) -> pd.Series:
+    """investing.com 日本語版を正規化。列名: 日付, 終値。日付は YYYY-MM-DD 形式。"""
+    df = df_raw.copy()
+    dates = pd.to_datetime(
+        df["日付"].astype(str).str.strip().str.replace('"', ""), format="mixed"
     )
-    s = pd.Series(pd.to_numeric(prices, errors="coerce").values, index=dates, name="vi")
+    s = pd.Series(_clean_num(df["終値"]).values, index=dates, name="vi")
     return s
 
 
@@ -121,7 +144,9 @@ def seed(input_path: Path) -> None:
     fmt = _detect_format(df_raw)
     print(f"フォーマット判定: {fmt}")
 
-    if fmt == "investing":
+    if fmt == "investing_ja":
+        s = _load_investing_ja(df_raw)
+    elif fmt == "investing":
         s = _load_investing(df_raw)
     elif fmt == "stooq":
         s = _load_stooq(df_raw)
