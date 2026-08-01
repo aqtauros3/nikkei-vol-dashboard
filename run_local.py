@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 # チャート用に渡す最大日数（VI Rank 窓と合わせる）
 _CHART_WINDOW = config.IV_HISTORY_WINDOW
 
+# OHLC 取得カレンダー日数：営業日→カレンダー日換算(×7/5) + HV 窓バッファ
+# 例: 252 * 7/5 + 20 + 30 ≈ 403 日 → 約285営業日を確保
+_OHLC_LOOKBACK = int(_CHART_WINDOW * 7 / 5) + config.HV_WINDOW + 30
+
 
 def _read_ohlc_csv() -> pd.DataFrame:
     path = config.OHLC_CSV
@@ -52,7 +56,7 @@ def main() -> int:
     logger.info("=== FETCH ===")
 
     try:
-        ohlc_new = fetch_ohlc(lookback_days=_CHART_WINDOW + 60)
+        ohlc_new = fetch_ohlc(lookback_days=_OHLC_LOOKBACK)
         upsert_ohlc(ohlc_new)
     except Exception as exc:
         msg = f"OHLC 取得失敗: {exc}"
