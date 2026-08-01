@@ -125,10 +125,14 @@ def main() -> int:
     )
 
     # チャート用 rolling series（直近 _CHART_WINDOW 日分）
-    hv_yz_series = (
-        realized_vol.yang_zhang(ohlc_df, config.HV_WINDOW, config.ANNUALIZATION) * 100.0
-    )
-    # VI と HV を日付で内部結合して VRP series を作る
+    # HV 全推定量（%）
+    hv_rolling: dict[str, pd.Series] = {
+        name: fn(ohlc_df, config.HV_WINDOW, config.ANNUALIZATION) * 100.0
+        for name, fn in realized_vol.ESTIMATORS.items()
+    }
+    hv_yz_series = hv_rolling.get("yang_zhang", pd.Series(dtype=float))
+
+    # VI と HV_YZ を日付で内部結合して VRP series を作る
     vi_aligned, hv_aligned = vi_series.align(hv_yz_series, join="inner")
     vrp_series = vi_aligned - hv_aligned
 
@@ -136,10 +140,11 @@ def main() -> int:
     vi_rolling_peak = vi_series.rolling(config.VI_PEAK_LOOKBACK).max()
     vi_drawdown_series = vi_series / vi_rolling_peak - 1.0
 
-    series: dict[str, pd.Series] = {
+    series: dict[str, Any] = {
         "vi": vi_series.tail(_CHART_WINDOW),
         "vi_ma": vi_ma_series.tail(_CHART_WINDOW),
         "hv_yz": hv_yz_series.tail(_CHART_WINDOW),
+        "hv_all": {k: v.tail(_CHART_WINDOW) for k, v in hv_rolling.items()},
         "vrp": vrp_series.tail(_CHART_WINDOW),
         "vi_drawdown": vi_drawdown_series.tail(_CHART_WINDOW),
     }
