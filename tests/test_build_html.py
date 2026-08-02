@@ -63,6 +63,13 @@ def _build_inputs(regime: str = "CALM") -> tuple[dict, dict]:
         "option_fetched_today": True,
         "option_data_date": "2024-08-01",
         "option_fetch_errors": [],
+        "iv_term_slope": {
+            "slope": -2.0,
+            "front_iv": 22.0,
+            "far_iv": 24.0,
+            "front_expiry": "202609",
+            "far_expiry": "202612",
+        },
     }
     series = {
         "vi": vi,
@@ -143,11 +150,11 @@ def test_build_fetch_failure_shows_warning(tmp_path, monkeypatch):
     assert "timeout" in html
 
 
-def test_build_contains_seven_charts(tmp_path, monkeypatch):
+def test_build_contains_nine_charts(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "DOCS", tmp_path)
     metrics, series = _build_inputs()
     build(metrics, series)
 
     html = (tmp_path / "index.html").read_text(encoding="utf-8")
-    # 既存4チャート + 新規3チャート（スキュー・IV期間構造・先物期間構造）
-    assert html.count("Plotly.newPlot") >= 7
+    # 4(VI/HV/VRP/drawdown) + 3(skew/iv_term/futures_term) + 2(iv_term_zoom/futures_term_zoom)
+    assert html.count("Plotly.newPlot") >= 9

@@ -11,6 +11,8 @@ put_call の値:
 """
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pandas as pd
 
@@ -163,9 +165,15 @@ def _flag_iv_outliers(
 # ---------------------------------------------------------------------------
 
 def iv_term_structure(df: pd.DataFrame) -> pd.Series:
-    """限月ごとの ATM IV（%）を返す Series（index=expiry, 昇順）。"""
+    """限月ごとの ATM IV（%）を返す Series（index=expiry, 昇順）。
+
+    月次スタンダード限月（6桁 YYYYMM）のみを対象とする。
+    Weekly オプション（8桁 YYYYMMDD）は残存が短く満期効果で IV が不安定なため除外。
+    """
     opts = filter_options(df)
-    expiries = sorted(opts["expiry"].dropna().unique())
+    expiries = sorted(
+        e for e in opts["expiry"].dropna().unique() if len(str(e)) == 6
+    )
     return pd.Series(
         {exp: atm_iv(df, exp) for exp in expiries},
         name="atm_iv",
@@ -184,6 +192,69 @@ def futures_term_structure(df: pd.DataFrame) -> pd.Series:
         .sort_index()
         .rename("settlement")
     )
+
+
+def iv_term_slope(df: pd.DataFrame) -> dict:
+    """期近 ATM IV と 3か月先 ATM IV のスロープ（期近 − 3M先, pt）を返す。
+
+    3か月先の選択根拠: 残存日数が 90 日に最も近い限月（期近を除く）。
+    90日 = 標準的な IV カーブの中間点であり、期近との差がバックワーデーション/
+    コンタンゴを端的に示す最小限の比較対象。
+
+    Returns:
+        dict with keys:
+            slope        : float  正=バックワーデーション(目先緊張), 負=コンタンゴ(平時型)
+            front_iv     : float
+            far_iv       : float
+            front_expiry : str  ("YYYYMM" or "" if unavailable)
+            far_expiry   : str
+    """
+    _NAN: dict = {
+        "slope": float("nan"),
+        "front_iv": float("nan"),
+        "far_iv": float("nan"),
+        "front_expiry": "",
+        "far_expiry": "",
+    }
+
+    opts = filter_options(df)
+    valid = opts[opts["days_to_expiry"].fillna(0) > 0]
+    if valid.empty:
+        return _NAN
+
+    # 月次スタンダード限月のみ（6桁 YYYYMM）。Weekly等（8桁）はスロープ計算のノイズになるため除外
+    valid = valid[valid["expiry"].astype(str).str.len() == 6]
+    if valid.empty:
+        return _NAN
+
+    # 限月ごとの代表 DTE（中央値）を昇順で取得
+    dte_by_expiry = (
+        valid.groupby("expiry")["days_to_expiry"]
+        .median()
+        .sort_values()
+    )
+    if len(dte_by_expiry) < 2:
+        return _NAN
+
+    front_expiry = dte_by_expiry.index[0]
+
+    # 3か月先: 期近を除いた中で DTE が 90 日に最も近い限月
+    dte_ex_front = dte_by_expiry.drop(front_expiry)
+    far_expiry = (dte_ex_front - 90.0).abs().idxmin()
+
+    front_iv_val = atm_iv(df, front_expiry)
+    far_iv_val = atm_iv(df, far_expiry)
+
+    if not (math.isfinite(front_iv_val) and math.isfinite(far_iv_val)):
+        return _NAN
+
+    return {
+        "slope": front_iv_val - far_iv_val,
+        "front_iv": front_iv_val,
+        "far_iv": far_iv_val,
+        "front_expiry": front_expiry,
+        "far_expiry": far_expiry,
+    }
 
 
 def futures_underlying_price(df: pd.DataFrame) -> float:

@@ -29,10 +29,20 @@ pytest                # テスト
 - 夜間は GitHub Actions が自動で集計・公開（PC起動不要）。
 - iPhone で Pages URL を開き「ホーム画面に追加」でアプリ風に。
 
+## 何が見えるか（フェーズ4 実装済み）
+- IV スキュー（モネーネス曲線・行使価格補助軸）
+- IV 期間構造・先物期間構造（全限月 + 期近ズーム）
+- IV 期間スロープ（期近 − 3ヶ月先、バックワーデーション/コンタンゴ判定）
+
+## ドキュメント
+- [GUIDE.md](GUIDE.md) — 各カード・チャートの読み方（ユーザー向け）
+- [SPEC.md](SPEC.md) — 計算モデルの正典と実装仕様（開発者向け）
+- [BUILD_PLAN.md](BUILD_PLAN.md) — フェーズ別の作業手順
+
 ## 構成
 - `src/` 取得・計算・レポート、`data/history/` 積み上げCSV、`docs/` 公開HTML
-- `CLAUDE.md` Claude Code 用の指針、`SPEC.md` 計算モデルの正典、`BUILD_PLAN.md` 手順
+- `CLAUDE.md` Claude Code 用の指針
 
 ## 拡張（有料/RSS）
 オプション個別（スキュー・期間構造）は J-Quants Standard か 楽天RSS で追加。詳細は
-`BUILD_PLAN.md` フェーズ4 と `SPEC.md`。
+[BUILD_PLAN.md](BUILD_PLAN.md) フェーズ4 と [SPEC.md](SPEC.md)。

@@ -291,6 +291,21 @@
       <div class="sub">スキュー近似。デルタ非保有のため参考値（例示）。</div>
     </div>
 
+    <div class="card">
+      <div class="label">IV 期間スロープ（期近 − 3M）</div>
+      <div class="value {% if metrics.iv_term_slope.slope is number and metrics.iv_term_slope.slope >= 0 %}vrp-pos{% else %}vrp-neg{% endif %}">
+        {{ metrics.iv_term_slope.slope | fmt("+.1f") }}<span class="unit">pt</span>
+      </div>
+      <div class="sub">
+        {% if metrics.option_data_ok and metrics.iv_term_slope.front_expiry %}
+          期近{{ metrics.iv_term_slope.front_expiry[0:4] }}/{{ metrics.iv_term_slope.front_expiry[4:] }}
+          − 3M先{{ metrics.iv_term_slope.far_expiry[0:4] }}/{{ metrics.iv_term_slope.far_expiry[4:] }}（例示）
+        {% else %}
+          データ取得失敗
+        {% endif %}
+      </div>
+    </div>
+
     <div class="card full regime-{{ metrics.regime | lower }}">
       <div class="label">レジーム</div>
       <div class="value">{{ metrics.regime }}</div>
@@ -339,7 +354,8 @@
       {% if metrics.option_data_ok %}
       <div class="chart-box">{{ charts.skew | safe }}</div>
       <p class="no-data-msg" style="font-size:10px; padding:6px 12px; background:none; color:#BDBDBD;">
-        ※ スキューは行使価格モネーネス近似。25ΔRR とは異なります。淡色点は低流動性建値（参考値）。閾値は例示。
+        ※ スキューは行使価格モネーネス近似。25ΔRR とは異なります。淡色点は低流動性建値（参考値）。閾値は例示。<br>
+        ※ 残存日数が短い期近限月は満期効果（タイムディケイ・低残存）でIVが不安定に跳ねやすい（参考値）。
       </p>
       {% else %}
       <p class="no-data-msg">オプションデータ取得失敗 — 次回更新をお待ちください</p>
@@ -352,18 +368,45 @@
     <h2 class="section-title">期間構造</h2>
 
     <details open>
-      <summary>IV 期間構造（ATM IV by 限月）</summary>
+      <summary>IV 期間構造（ATM IV by 限月・全限月）</summary>
       {% if metrics.option_data_ok %}
       <div class="chart-box">{{ charts.iv_term | safe }}</div>
+      <p class="no-data-msg" style="font-size:10px; padding:6px 12px; background:none; color:#BDBDBD;">
+        ※ 残存日数が短い期近限月は満期効果でIVが不安定になりやすい（詳細は期近ズームを参照）。
+      </p>
       {% else %}
       <p class="no-data-msg">オプションデータ取得失敗</p>
       {% endif %}
     </details>
 
     <details open>
-      <summary>先物期間構造（限月別清算値）</summary>
+      <summary>IV 期間構造・期近ズーム（前4限月）</summary>
+      {% if metrics.option_data_ok %}
+      <div class="chart-box">{{ charts.iv_term_zoom | safe }}</div>
+      <p class="no-data-msg" style="font-size:10px; padding:6px 12px; background:none; color:#BDBDBD;">
+        ※ 残存日数が短い期近限月は満期効果（タイムディケイ・低残存）でIVが不安定に跳ねやすいため参考値。閾値は例示。
+      </p>
+      {% else %}
+      <p class="no-data-msg">オプションデータ取得失敗</p>
+      {% endif %}
+    </details>
+
+    <details open>
+      <summary>先物期間構造（限月別清算値・全限月）</summary>
       {% if metrics.option_data_ok %}
       <div class="chart-box">{{ charts.futures_term | safe }}</div>
+      {% else %}
+      <p class="no-data-msg">オプションデータ取得失敗</p>
+      {% endif %}
+    </details>
+
+    <details open>
+      <summary>先物期間構造・期近ズーム（前4限月）</summary>
+      {% if metrics.option_data_ok %}
+      <div class="chart-box">{{ charts.futures_term_zoom | safe }}</div>
+      <p class="no-data-msg" style="font-size:10px; padding:6px 12px; background:none; color:#BDBDBD;">
+        ※ 残存日数が短い期近限月は満期効果（タイムディケイ・低残存）でIVが不安定に跳ねやすいため参考値。閾値は例示。
+      </p>
       {% else %}
       <p class="no-data-msg">オプションデータ取得失敗</p>
       {% endif %}

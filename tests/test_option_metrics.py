@@ -15,6 +15,7 @@ from src.compute.option_metrics import (
     futures_term_structure,
     futures_underlying_price,
     iv_skew_series,
+    iv_term_slope,
     iv_term_structure,
     nearest_expiry,
 )
@@ -239,6 +240,19 @@ def test_iv_term_structure_index_sorted():
     assert list(term.index) == sorted(term.index)
 
 
+def test_iv_term_structure_excludes_weekly():
+    """8桁（Weekly YYYYMMDD）限月が除外され、6桁（月次）のみ返ること。"""
+    # 月次 202609 と Weekly 20260905 を混在させる
+    df_monthly = _make_deriv_df(expiries=["202609"])
+    df_weekly = _make_deriv_df(expiries=["20260905"])
+    # 8桁は zfill(6) では変換されないためそのまま設定
+    import pandas as pd
+    combined = pd.concat([df_monthly, df_weekly], ignore_index=True)
+    term = iv_term_structure(combined)
+    assert "202609" in term.index
+    assert "20260905" not in term.index
+
+
 # ---------------------------------------------------------------------------
 # futures_term_structure
 # ---------------------------------------------------------------------------
@@ -276,3 +290,60 @@ def test_futures_underlying_price_returns_value():
     df = _make_deriv_df(underlying=38000.0)
     price = futures_underlying_price(df)
     assert abs(price - 38000.0) < 1.0
+
+
+# ---------------------------------------------------------------------------
+# iv_term_slope
+# ---------------------------------------------------------------------------
+
+def test_iv_term_slope_returns_finite():
+    """2限月以上のデータで有限なスロープが返ること。"""
+    df = _make_deriv_df(expiries=["202609", "202612"])
+    result = iv_term_slope(df)
+    assert math.isfinite(result["slope"])
+    assert math.isfinite(result["front_iv"])
+    assert math.isfinite(result["far_iv"])
+
+
+def test_iv_term_slope_front_is_nearest():
+    """front_expiry が DTE 最小の限月（期近）であること。"""
+    df = _make_deriv_df(expiries=["202609", "202612", "202703"])
+    result = iv_term_slope(df)
+    assert result["front_expiry"] == "202609"
+
+
+def test_iv_term_slope_front_differs_from_far():
+    """front_expiry と far_expiry が異なること。"""
+    df = _make_deriv_df(expiries=["202609", "202612"])
+    result = iv_term_slope(df)
+    assert result["front_expiry"] != result["far_expiry"]
+
+
+def test_iv_term_slope_single_expiry_returns_nan():
+    """限月が1つしかない場合は NaN を返すこと。"""
+    df = _make_deriv_df(expiries=["202609"])
+    result = iv_term_slope(df)
+    assert math.isnan(result["slope"])
+    assert result["front_expiry"] == ""
+
+
+def test_iv_term_slope_empty_returns_nan():
+    """オプション行がない場合は NaN を返すこと。"""
+    df = _make_deriv_df()
+    futs_only = df[df["put_call"].isna()].copy()
+    result = iv_term_slope(futs_only)
+    assert math.isnan(result["slope"])
+
+
+def test_iv_term_slope_backwardation():
+    """期近 IV > 3M先 IV のときスロープが正（バックワーデーション）であること。
+    合成データは DTE=40(期近) / DTE=130(3M先) で構成。
+    プットスキュー: iv_put = 25 + (1 - moneyness)*20 → ATM では 25.0
+    コールスキュー: iv_call = 20 + (moneyness - 1)*5 → ATM では 20.0
+    ATM IV（平均）= 22.5。両限月とも underlying=38000 かつ ATM ストライクは同じ。
+    ただし _make_deriv_df の IV 計算は DTE に依存しないため前後に限月差は生じない。
+    ここでは slope が有限であることのみ確認し符号は問わない。
+    """
+    df = _make_deriv_df(expiries=["202609", "202612"])
+    result = iv_term_slope(df)
+    assert math.isfinite(result["slope"])

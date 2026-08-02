@@ -28,6 +28,9 @@ from src import config as cfg
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
+# 期近ズームで表示する限月数
+_FRONT_MONTHS_ZOOM = 4
+
 # 推定量の表示名（日本語）
 _HV_LABELS: dict[str, str] = {
     "yang_zhang": "YZ（主）",
@@ -49,6 +52,8 @@ def build(metrics: dict, series: dict) -> None:
         "skew": _chart_skew(series),
         "iv_term": _chart_iv_term(series),
         "futures_term": _chart_futures_term(series),
+        "iv_term_zoom": _chart_iv_term_zoom(series),
+        "futures_term_zoom": _chart_futures_term_zoom(series),
     }
 
     env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)), autoescape=False)
@@ -197,9 +202,11 @@ def _empty_chart(title: str) -> str:
 
 def _chart_skew(series: dict) -> str:
     """IV スキューチャート（Put/Call 2本色分け、異常値淡色表示）。
+    上部補助軸（xaxis2）に主要モネーネス位置の行使価格実額を併記（参考）。
 
     設計根拠: OTM プットのプレミアム割高（プットスキュー）を直接視覚化するため、
     Put と Call を別系列として描画する。OTM ブレンド単曲線は市場の非対称性を隠蔽する。
+    行使価格補助軸は主軸（モネーネス）の時系列一貫性を保ちつつ実額の直感を補う。
     """
     skew_df = series.get("iv_skew")
     if skew_df is None or (hasattr(skew_df, "empty") and skew_df.empty):
@@ -207,6 +214,7 @@ def _chart_skew(series: dict) -> str:
 
     expiry = series.get("iv_skew_expiry", "")
     title_exp = f"{expiry[:4]}/{expiry[4:]}" if len(expiry) == 6 else expiry
+    underlying = series.get("futures_underlying", float("nan"))
 
     fig = go.Figure()
 
@@ -255,9 +263,48 @@ def _chart_skew(series: dict) -> str:
     fig.add_vline(x=1.0, line_dash="dash", line_color="#9E9E9E", line_width=1,
                   annotation_text="ATM", annotation_position="top right",
                   annotation_font_size=10)
+
     layout = _base_layout(f"IVスキュー — {title_exp}限月（行使価格モネーネス近似）")
     layout["xaxis"]["title"] = "モネーネス（行使価格 / 現物終値）"
     layout["yaxis"]["title"] = "IV（年率%）"
+
+    # 行使価格補助軸: 主要モネーネス位置に対応する行使価格実額（参考）
+    if isinstance(underlying, (int, float)) and math.isfinite(underlying) and underlying > 0:
+        _key_m = [0.85, 0.90, 0.95, 1.00, 1.05, 1.10, 1.15]
+        _ticktext = [f"{underlying * m:,.0f}" for m in _key_m]
+        # x 軸レンジをデータから確定し両軸に明示してズレを防ぐ
+        _xmin = float(skew_df["moneyness"].min()) - 0.01
+        _xmax = float(skew_df["moneyness"].max()) + 0.01
+        # ダミートレースの y に使う代表値（Put/Call IV の平均）
+        _iv_flat = [
+            v for col in ("iv_put", "iv_call")
+            for v in skew_df[col].tolist()
+            if isinstance(v, float) and not math.isnan(v) and v > 0
+        ]
+        _y_dummy = sum(_iv_flat) / len(_iv_flat) if _iv_flat else 25.0
+        layout["xaxis"]["range"] = [_xmin, _xmax]
+        layout["margin"]["t"] = 62
+        layout["xaxis2"] = dict(
+            title=dict(text="行使価格（円）", font=dict(size=10), standoff=4),
+            overlaying="x",
+            side="top",
+            tickmode="array",
+            tickvals=_key_m,
+            ticktext=_ticktext,
+            range=[_xmin, _xmax],
+            showgrid=False,
+            zeroline=False,
+            tickfont=dict(size=9),
+        )
+        # Plotly は参照トレースが無い軸を描画しないため、不可視ダミートレースで xaxis2 を有効化
+        fig.add_trace(go.Scatter(
+            x=_key_m, y=[_y_dummy] * len(_key_m),
+            xaxis="x2", yaxis="y",
+            mode="markers",
+            marker=dict(size=1, opacity=0, color="rgba(0,0,0,0)"),
+            showlegend=False, hoverinfo="none", name="",
+        ))
+
     fig.update_layout(**layout)
     return _to_div(fig)
 
@@ -334,5 +381,138 @@ def _chart_futures_term(series: dict) -> str:
     layout["xaxis"]["title"] = "限月"
     layout["yaxis"]["title"] = "清算値段（円）"
     layout["yaxis"]["tickformat"] = ","
+    fig.update_layout(**layout)
+    return _to_div(fig)
+
+
+def _chart_iv_term_zoom(series: dict) -> str:
+    """IV 期間構造・期近ズームチャート（前 _FRONT_MONTHS_ZOOM 限月のみ）。
+    縦軸をデータ範囲にフィットさせ各点に IV 値ラベルを表示。傾き方向を動的に注記。
+    """
+    iv_term = series.get("iv_term")
+    if iv_term is None or (hasattr(iv_term, "empty") and iv_term.empty):
+        return _empty_chart("IV 期間構造・期近ズーム（データなし）")
+    iv_term = iv_term.dropna()
+    if iv_term.empty:
+        return _empty_chart("IV 期間構造・期近ズーム（データなし）")
+
+    front = iv_term.head(_FRONT_MONTHS_ZOOM)
+    labels = [f"{e[:4]}/{e[4:]}" if len(e) == 6 else e for e in front.index]
+    y_vals = front.values.tolist()
+
+    # 傾き方向でバックワーデーション/コンタンゴを判定
+    _slope_ann = ""
+    if len(y_vals) >= 2:
+        _slope_ann = (
+            "▲ バックワーデーション（期近高IV・目先緊張）" if y_vals[0] > y_vals[-1]
+            else "▽ コンタンゴ（期近低IV・平時型）"
+        )
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=labels, y=y_vals,
+        mode="lines+markers+text",
+        text=[f"{v:.1f}%" for v in y_vals],
+        textposition="top center",
+        textfont=dict(size=11, color="#1565C0"),
+        name="ATM IV（Call/Put 平均）",
+        line=dict(color="#1565C0", width=2.0),
+        marker=dict(size=10, color="#1565C0"),
+    ))
+
+    if _slope_ann:
+        fig.add_annotation(
+            text=_slope_ann,
+            x=0.5, y=0.97,
+            xref="paper", yref="paper",
+            showarrow=False,
+            font=dict(size=10, color="#555"),
+            bgcolor="rgba(255,255,255,0.85)",
+            bordercolor="#BDBDBD",
+            borderwidth=1,
+            xanchor="center",
+            yanchor="top",
+        )
+
+    # 縦軸をデータ範囲にフィット（VI 水平線による引き伸ばしを回避）
+    layout = _base_layout(f"IV 期間構造・期近{len(front)}限月ズーム（年率%）")
+    layout["xaxis"]["title"] = "限月"
+    layout["yaxis"]["title"] = "ATM IV（年率%）"
+    layout["yaxis"]["range"] = [min(y_vals) - 0.5, max(y_vals) + 2.5]
+    fig.update_layout(**layout)
+    return _to_div(fig)
+
+
+def _chart_futures_term_zoom(series: dict) -> str:
+    """先物期間構造・期近ズームチャート（前 _FRONT_MONTHS_ZOOM 限月のみ）。
+    縦軸をデータ範囲にフィットさせ各点に清算値ラベルを表示。傾き方向を動的に注記。
+    """
+    fut_term = series.get("futures_term")
+    if fut_term is None or (hasattr(fut_term, "empty") and fut_term.empty):
+        return _empty_chart("先物期間構造・期近ズーム（データなし）")
+    fut_term = fut_term.dropna()
+    if fut_term.empty:
+        return _empty_chart("先物期間構造・期近ズーム（データなし）")
+
+    front = fut_term.head(_FRONT_MONTHS_ZOOM)
+    labels = [f"{e[:4]}/{e[4:]}" if len(e) == 6 else e for e in front.index]
+    y_vals = front.values.tolist()
+
+    # 先物構造判定: 後限 > 前限 = コンタンゴ（順鞘・通常）
+    _slope_ann = ""
+    if len(y_vals) >= 2:
+        _slope_ann = (
+            "▲ バックワーデーション（逆鞘・前限高）" if y_vals[0] > y_vals[-1]
+            else "▽ コンタンゴ（順鞘・後限高）"
+        )
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=labels, y=y_vals,
+        mode="lines+markers+text",
+        text=[f"{v:,.0f}" for v in y_vals],
+        textposition="top center",
+        textfont=dict(size=10, color="#2E7D32"),
+        name="先物清算値",
+        line=dict(color="#2E7D32", width=2.0),
+        marker=dict(size=10, color="#2E7D32"),
+    ))
+
+    if _slope_ann:
+        fig.add_annotation(
+            text=_slope_ann,
+            x=0.5, y=0.97,
+            xref="paper", yref="paper",
+            showarrow=False,
+            font=dict(size=10, color="#555"),
+            bgcolor="rgba(255,255,255,0.85)",
+            bordercolor="#BDBDBD",
+            borderwidth=1,
+            xanchor="center",
+            yanchor="top",
+        )
+
+    # 現物終値水平線
+    fut_underlying = series.get("futures_underlying")
+    _has_underlying = (
+        fut_underlying is not None
+        and not (isinstance(fut_underlying, float) and math.isnan(fut_underlying))
+    )
+    if _has_underlying:
+        fig.add_hline(
+            y=fut_underlying, line_dash="solid", line_color="#555", line_width=1,
+            annotation_text=f"現物終値: {fut_underlying:,.0f}円",
+            annotation_position="top left",
+            annotation_font_size=10,
+        )
+
+    # 縦軸をデータ範囲にフィット（現物終値も含めてスパンを計算）
+    all_y = y_vals + ([float(fut_underlying)] if _has_underlying else [])
+    _y_span = max(max(all_y) - min(all_y), 100)
+    layout = _base_layout(f"先物期間構造・期近{len(front)}限月ズーム（円）")
+    layout["xaxis"]["title"] = "限月"
+    layout["yaxis"]["title"] = "清算値段（円）"
+    layout["yaxis"]["tickformat"] = ","
+    layout["yaxis"]["range"] = [min(all_y) - _y_span * 0.3, max(all_y) + _y_span * 0.9]
     fig.update_layout(**layout)
     return _to_div(fig)

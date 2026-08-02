@@ -132,6 +132,7 @@ def main() -> int:
             fut_term_s = option_metrics.futures_term_structure(deriv_latest)
             fut_underlying = option_metrics.futures_underlying_price(deriv_latest)
             option_data_date = str(deriv_latest["date"].iloc[0])
+            iv_slope = option_metrics.iv_term_slope(deriv_latest)
         except Exception as exc:
             logger.warning("option_metrics 計算エラー: %s", exc)
             option_data_ok = False
@@ -141,6 +142,10 @@ def main() -> int:
         fut_underlying = float("nan")
         front_exp = ""
         option_data_date = "N/A"
+        iv_slope = {
+            "slope": float("nan"), "front_iv": float("nan"),
+            "far_iv": float("nan"), "front_expiry": "", "far_expiry": "",
+        }
 
     # レジーム
     vi_ma_series = regime.vi_moving_average(vi_series, config.VI_MA_WINDOW)
@@ -171,6 +176,7 @@ def main() -> int:
         "option_fetched_today": option_fetched_today,
         "option_data_date": option_data_date,
         "option_fetch_errors": jpx_fetch_errors,
+        "iv_term_slope": iv_slope,
     }
     logger.info(
         "VI=%.2f IVP=%.1f%% IVR=%.1f%% HV_YZ=%.1f%% VRP=%.2f レジーム=%s",
