@@ -121,7 +121,8 @@ def main() -> int:
 
     # JPX オプション指標
     deriv_latest = load_derivatives_latest()
-    option_data_ok = not deriv_latest.empty and not jpx_fetch_errors
+    option_data_ok = not deriv_latest.empty          # 蓄積データの有無のみで判定
+    option_fetched_today = not jpx_fetch_errors      # 当日取得成否は別フラグ
     if option_data_ok:
         try:
             front_exp = option_metrics.nearest_expiry(deriv_latest)
@@ -167,6 +168,7 @@ def main() -> int:
         "atm_iv": atm_iv_val,
         "vrp_option": vrp_option,
         "option_data_ok": option_data_ok,
+        "option_fetched_today": option_fetched_today,
         "option_data_date": option_data_date,
         "option_fetch_errors": jpx_fetch_errors,
     }

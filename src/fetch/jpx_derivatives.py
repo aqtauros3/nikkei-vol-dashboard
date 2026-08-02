@@ -77,6 +77,12 @@ def fetch_derivatives(trade_date: pd.Timestamp | None = None) -> pd.DataFrame:
     if trade_date is None:
         trade_date = pd.Timestamp.now(tz=config.TIMEZONE).normalize().tz_localize(None)
 
+    # 土日は JPX 休場 → 直近営業日（金曜）にロールバック
+    if trade_date.dayofweek >= 5:
+        bdays = pd.bdate_range(end=trade_date - pd.Timedelta(days=1), periods=1)
+        trade_date = bdays[-1]
+        logger.info("非営業日のため直近営業日を使用: %s", trade_date.date())
+
     date_str = trade_date.strftime("%Y-%m-%d")
     yyyymmdd = trade_date.strftime("%Y%m%d")
 

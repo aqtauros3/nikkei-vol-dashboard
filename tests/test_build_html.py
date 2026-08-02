@@ -60,6 +60,7 @@ def _build_inputs(regime: str = "CALM") -> tuple[dict, dict]:
         "atm_iv": 22.0,
         "vrp_option": 3.0,
         "option_data_ok": True,
+        "option_fetched_today": True,
         "option_data_date": "2024-08-01",
         "option_fetch_errors": [],
     }

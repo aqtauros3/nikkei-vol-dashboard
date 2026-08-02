@@ -222,12 +222,15 @@
 {% endif %}
 
 {# ---- JPX オプションデータ警告 ---- #}
-{% if not metrics.option_data_ok %}
+{% if not metrics.option_fetched_today and metrics.option_data_ok %}
 <div class="banner warning">
-  オプションデータ取得失敗 — スキュー・期間構造は前回値または非表示
-  {% if metrics.option_fetch_errors %}
-    （{{ metrics.option_fetch_errors[0] }}）
-  {% endif %}
+  オプションデータ：前回値を表示中（{{ metrics.option_data_date }} 時点）
+  {% if metrics.option_fetch_errors %} — {{ metrics.option_fetch_errors[0] }}{% endif %}
+</div>
+{% elif not metrics.option_data_ok %}
+<div class="banner warning">
+  オプションデータなし — スキュー・期間構造は非表示
+  {% if metrics.option_fetch_errors %} — {{ metrics.option_fetch_errors[0] }}{% endif %}
 </div>
 {% endif %}
 
