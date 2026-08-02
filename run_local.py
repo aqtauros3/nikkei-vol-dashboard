@@ -18,6 +18,12 @@ import pandas as pd
 
 from src import config
 from src.compute import iv_metrics, realized_vol, regime
+from src.compute import option_metrics
+from src.fetch.jpx_derivatives import (
+    fetch_derivatives,
+    load_derivatives_latest,
+    upsert_derivatives,
+)
 from src.fetch.nikkei_ohlc import fetch_ohlc, upsert_history as upsert_ohlc
 from src.fetch.nikkei_vi import append_vi, fetch_vi_latest, load_vi_history
 
@@ -72,6 +78,17 @@ def main() -> int:
         fetch_errors.append(msg)
         logger.warning("%s → 前回 CSV で縮退運転", msg)
 
+    # JPX 清算値段 CSV（オプション IV・先物清算値）
+    jpx_fetch_errors: list[str] = []
+    try:
+        deriv_df = fetch_derivatives()
+        upsert_derivatives(deriv_df)
+        logger.info("JPX derivatives 取得: %d 行", len(deriv_df))
+    except Exception as exc:
+        msg = f"JPX derivatives 取得失敗: {exc}"
+        jpx_fetch_errors.append(msg)
+        logger.warning("%s → 前回 CSV で縮退運転", msg)
+
     # ------------------------------------------------------------------
     # 2. COMPUTE
     # ------------------------------------------------------------------
@@ -102,6 +119,28 @@ def main() -> int:
     vi_latest = float(vi_series.iloc[-1])
     vrp = iv_metrics.vrp_proxy(vi_latest, hv_primary)
 
+    # JPX オプション指標
+    deriv_latest = load_derivatives_latest()
+    option_data_ok = not deriv_latest.empty and not jpx_fetch_errors
+    if option_data_ok:
+        try:
+            front_exp = option_metrics.nearest_expiry(deriv_latest)
+            atm_iv_val = option_metrics.atm_iv(deriv_latest, front_exp)
+            skew_df = option_metrics.iv_skew_series(deriv_latest, front_exp)
+            iv_term_s = option_metrics.iv_term_structure(deriv_latest)
+            fut_term_s = option_metrics.futures_term_structure(deriv_latest)
+            fut_underlying = option_metrics.futures_underlying_price(deriv_latest)
+            option_data_date = str(deriv_latest["date"].iloc[0])
+        except Exception as exc:
+            logger.warning("option_metrics 計算エラー: %s", exc)
+            option_data_ok = False
+    if not option_data_ok:
+        atm_iv_val = float("nan")
+        skew_df = iv_term_s = fut_term_s = None
+        fut_underlying = float("nan")
+        front_exp = ""
+        option_data_date = "N/A"
+
     # レジーム
     vi_ma_series = regime.vi_moving_average(vi_series, config.VI_MA_WINDOW)
     slope = regime.vi_slope(vi_series, config.VI_SLOPE_LOOKBACK)
@@ -111,6 +150,8 @@ def main() -> int:
         else float("nan")
     )
     flag = regime.regime_flag(vi_latest, vi_ma_latest, slope)
+
+    vrp_option = iv_metrics.vrp_proxy(atm_iv_val, hv_primary)
 
     metrics: dict[str, Any] = {
         "date": vi_series.index[-1].strftime("%Y-%m-%d"),
@@ -122,6 +163,12 @@ def main() -> int:
         "regime": flag,
         "fetch_ok": len(fetch_errors) == 0,
         "fetch_errors": fetch_errors,
+        # JPX オプション由来指標
+        "atm_iv": atm_iv_val,
+        "vrp_option": vrp_option,
+        "option_data_ok": option_data_ok,
+        "option_data_date": option_data_date,
+        "option_fetch_errors": jpx_fetch_errors,
     }
     logger.info(
         "VI=%.2f IVP=%.1f%% IVR=%.1f%% HV_YZ=%.1f%% VRP=%.2f レジーム=%s",
@@ -151,6 +198,12 @@ def main() -> int:
         "hv_all": {k: v.tail(_CHART_WINDOW) for k, v in hv_rolling.items()},
         "vrp": vrp_series.tail(_CHART_WINDOW),
         "vi_drawdown": vi_drawdown_series.tail(_CHART_WINDOW),
+        # JPX オプション由来チャート用データ
+        "iv_skew": skew_df,
+        "iv_skew_expiry": front_exp,
+        "iv_term": iv_term_s,
+        "futures_term": fut_term_s,
+        "futures_underlying": fut_underlying,
     }
 
     # ------------------------------------------------------------------

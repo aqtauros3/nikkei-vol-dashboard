@@ -109,8 +109,65 @@
     .regime-unknown { background: #F5F5F5; }
     .regime-unknown .value { color: #757575; }
 
+    /* ---- セクションナビ ---- */
+    .section-nav {
+      display: flex;
+      gap: 8px;
+      padding: 8px 12px 6px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .section-nav::-webkit-scrollbar { display: none; }
+    .nav-btn {
+      flex: 0 0 auto;
+      background: #0D47A1;
+      color: #FFFFFF;
+      border-radius: 20px;
+      padding: 6px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
     /* ---- チャートセクション ---- */
-    .charts { padding: 4px 12px 12px; }
+    .chart-section {
+      padding: 0 12px 4px;
+    }
+    .section-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #424242;
+      padding: 10px 0 6px;
+      border-bottom: 2px solid #0D47A1;
+      margin-bottom: 8px;
+    }
+
+    /* details 折りたたみ（JS 不要・プログレッシブエンハンスメント） */
+    details {
+      margin-bottom: 8px;
+    }
+    details > summary {
+      font-size: 13px;
+      font-weight: 600;
+      color: #555;
+      cursor: pointer;
+      padding: 8px 4px;
+      user-select: none;
+      list-style: none;
+    }
+    details > summary::-webkit-details-marker { display: none; }
+    details > summary::before {
+      content: "▶ ";
+      font-size: 10px;
+      color: #0D47A1;
+    }
+    details[open] > summary::before {
+      content: "▼ ";
+    }
+
+    /* チャートボックス */
     .chart-box {
       background: #FFFFFF;
       border-radius: 12px;
@@ -118,21 +175,31 @@
       box-shadow: 0 1px 3px rgba(0,0,0,0.10);
       overflow: hidden;
     }
-
-    /* plotly の div を幅いっぱいに */
     .chart-box .js-plotly-plot,
     .chart-box .plotly-graph-div {
       width: 100% !important;
     }
 
+    /* データなし表示 */
+    .no-data-msg {
+      padding: 28px 16px;
+      text-align: center;
+      color: #9E9E9E;
+      font-size: 13px;
+      background: #FFFFFF;
+      border-radius: 12px;
+      margin-bottom: 10px;
+    }
+
     /* ---- フッター ---- */
     footer {
-      padding: 14px 16px 28px;
+      padding: 14px 16px 36px;
       font-size: 11px;
       color: #9E9E9E;
       line-height: 1.6;
       text-align: center;
       border-top: 1px solid #E0E0E0;
+      margin-top: 8px;
     }
     footer p + p { margin-top: 4px; }
   </style>
@@ -151,6 +218,16 @@
 <div class="banner warning">
   更新失敗・前回値を表示中 —
   {% for e in metrics.fetch_errors %}{{ e }}{% if not loop.last %} / {% endif %}{% endfor %}
+</div>
+{% endif %}
+
+{# ---- JPX オプションデータ警告 ---- #}
+{% if not metrics.option_data_ok %}
+<div class="banner warning">
+  オプションデータ取得失敗 — スキュー・期間構造は前回値または非表示
+  {% if metrics.option_fetch_errors %}
+    （{{ metrics.option_fetch_errors[0] }}）
+  {% endif %}
 </div>
 {% endif %}
 
@@ -184,11 +261,31 @@
     </div>
 
     <div class="card">
-      <div class="label">VRP</div>
+      <div class="label">VRP（VI − HV）</div>
       <div class="value {% if metrics.vrp is number and metrics.vrp >= 0 %}vrp-pos{% else %}vrp-neg{% endif %}">
         {{ metrics.vrp | fmt("+.2f") }}<span class="unit">pt</span>
       </div>
       <div class="sub">売り目安 &gt;+{{ cfg.VRP_ENTRY_VOLPTS | int }}pt（例示）</div>
+    </div>
+
+    <div class="card">
+      <div class="label">ATM IV（期近・オプション由来）</div>
+      <div class="value">{{ metrics.atm_iv | fmt(".1f") }}<span class="unit">%</span></div>
+      <div class="sub">
+        {% if metrics.option_data_ok %}
+          基準日: {{ metrics.option_data_date }}
+        {% else %}
+          データ取得失敗
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="label">VRP（ATM IV − HV, 参考）</div>
+      <div class="value {% if metrics.vrp_option is number and metrics.vrp_option >= 0 %}vrp-pos{% else %}vrp-neg{% endif %}">
+        {{ metrics.vrp_option | fmt("+.2f") }}<span class="unit">pt</span>
+      </div>
+      <div class="sub">スキュー近似。デルタ非保有のため参考値（例示）。</div>
     </div>
 
     <div class="card full regime-{{ metrics.regime | lower }}">
@@ -206,31 +303,76 @@
 
   </section>
 
-  {# ---- チャート 4 種 ---- #}
-  <section class="charts">
+  {# ---- セクションナビ ---- #}
+  <nav class="section-nav" aria-label="セクションナビゲーション">
+    <a class="nav-btn" href="#vol">ボラティリティ</a>
+    <a class="nav-btn" href="#skew">IVスキュー</a>
+    <a class="nav-btn" href="#term">期間構造</a>
+  </nav>
 
-    <div class="chart-box">
-      {{ charts.vi | safe }}
-    </div>
+  {# ---- セクション: ボラティリティ推移 ---- #}
+  <section id="vol" class="chart-section">
+    <h2 class="section-title">ボラティリティ推移</h2>
 
-    <div class="chart-box">
-      {{ charts.hv | safe }}
-    </div>
+    <details open>
+      <summary>VI・HV 推移</summary>
+      <div class="chart-box">{{ charts.vi | safe }}</div>
+      <div class="chart-box">{{ charts.hv | safe }}</div>
+    </details>
 
-    <div class="chart-box">
-      {{ charts.vrp | safe }}
-    </div>
+    <details open>
+      <summary>VRP・ピーク比</summary>
+      <div class="chart-box">{{ charts.vrp | safe }}</div>
+      <div class="chart-box">{{ charts.drawdown | safe }}</div>
+    </details>
+  </section>
 
-    <div class="chart-box">
-      {{ charts.drawdown | safe }}
-    </div>
+  {# ---- セクション: IV スキュー ---- #}
+  <section id="skew" class="chart-section">
+    <h2 class="section-title">IV スキュー</h2>
 
+    <details open>
+      <summary>行使価格別 IV（Put/Call 2本、期近限月）</summary>
+      {% if metrics.option_data_ok %}
+      <div class="chart-box">{{ charts.skew | safe }}</div>
+      <p class="no-data-msg" style="font-size:10px; padding:6px 12px; background:none; color:#BDBDBD;">
+        ※ スキューは行使価格モネーネス近似。25ΔRR とは異なります。淡色点は低流動性建値（参考値）。閾値は例示。
+      </p>
+      {% else %}
+      <p class="no-data-msg">オプションデータ取得失敗 — 次回更新をお待ちください</p>
+      {% endif %}
+    </details>
+  </section>
+
+  {# ---- セクション: 期間構造 ---- #}
+  <section id="term" class="chart-section">
+    <h2 class="section-title">期間構造</h2>
+
+    <details open>
+      <summary>IV 期間構造（ATM IV by 限月）</summary>
+      {% if metrics.option_data_ok %}
+      <div class="chart-box">{{ charts.iv_term | safe }}</div>
+      {% else %}
+      <p class="no-data-msg">オプションデータ取得失敗</p>
+      {% endif %}
+    </details>
+
+    <details open>
+      <summary>先物期間構造（限月別清算値）</summary>
+      {% if metrics.option_data_ok %}
+      <div class="chart-box">{{ charts.futures_term | safe }}</div>
+      {% else %}
+      <p class="no-data-msg">オプションデータ取得失敗</p>
+      {% endif %}
+    </details>
   </section>
 
 </main>
 
 <footer>
   <p>表示値・閾値はすべて例示であり、投資助言ではありません。</p>
+  <p>スキュー値はデルタ非保有のため行使価格モネーネス近似。25ΔRRとは異なります。</p>
+  <p>低流動性建値の IV は参考値（淡色）。実取引前に流動性・スプレッドを必ず確認ください。</p>
   <p>実運用前に必ず自身でバックテスト較正してください。</p>
   <p>VI データ遅延: 最大20分 | 更新: {{ metrics.date }}</p>
 </footer>

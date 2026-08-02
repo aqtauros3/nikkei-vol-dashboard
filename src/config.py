@@ -44,3 +44,20 @@ VI_SEED_NOTE = "data/history/nikkei_vi.csv を投資サイトの履歴CSVで一�
 # --- 表示 ---
 SITE_TITLE = "日経225 ボラティリティ監視ダッシュボード"
 TIMEZONE = "Asia/Tokyo"
+
+# --- JPX デリバティブデータ設定 ---
+JPX_DERIVATIVES_CSV     = HISTORY / "jpx_derivatives.csv"
+JPX_SETTLEMENT_INDEX_URL = (
+    "https://www.jpx.co.jp/markets/derivatives/settlement-price/index.html"
+)
+JPX_TARGET_UNDERLYING   = "日経225"      # フィルタ対象の原資産名称
+JPX_OPTION_PUT_CALL     = ("PUT", "CAL") # CSVの値そのまま
+
+# ATM IV 計算: underlying ±この割合以内の strike を ATM 候補とみなす
+ATM_MONEYNESS_BAND      = 0.02           # ±2%
+
+# IV 異常値フィルタ: ローリング中央値（window=5）からの相対乖離率閾値
+IV_OUTLIER_PCT_THRESH   = 0.30           # ±30%超で淡色表示
+
+# seed 時の遡り営業日数（JPXは約2ヶ月保持なので60で大半を回収可能）
+SEED_LOOKBACK_BDAYS     = 60

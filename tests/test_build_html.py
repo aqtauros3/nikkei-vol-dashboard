@@ -34,6 +34,19 @@ def _build_inputs(regime: str = "CALM") -> tuple[dict, dict]:
         "rogers_satchell": hv_yz * 0.98,
     }
 
+    # IV スキュー・期間構造の合成データ
+    strikes = [36000, 37000, 38000, 39000, 40000]
+    underlying = 38000.0
+    skew_df = pd.DataFrame({
+        "moneyness": [s / underlying for s in strikes],
+        "iv_put": [28.0, 25.0, 22.0, 20.0, 19.0],
+        "iv_call": [20.0, 21.0, 22.0, 23.0, 24.0],
+        "outlier_put": [False] * 5,
+        "outlier_call": [False] * 5,
+    })
+    iv_term = pd.Series({"202609": 22.0, "202612": 24.0, "202703": 25.5}, name="atm_iv")
+    futures_term = pd.Series({"202609": 38300.0, "202612": 38600.0, "202703": 38850.0}, name="settlement")
+
     metrics = {
         "date": "2024-08-01",
         "vi": float(vi.iloc[-1]),
@@ -44,6 +57,11 @@ def _build_inputs(regime: str = "CALM") -> tuple[dict, dict]:
         "regime": regime,
         "fetch_ok": True,
         "fetch_errors": [],
+        "atm_iv": 22.0,
+        "vrp_option": 3.0,
+        "option_data_ok": True,
+        "option_data_date": "2024-08-01",
+        "option_fetch_errors": [],
     }
     series = {
         "vi": vi,
@@ -52,6 +70,11 @@ def _build_inputs(regime: str = "CALM") -> tuple[dict, dict]:
         "hv_all": hv_all,
         "vrp": vrp,
         "vi_drawdown": dd,
+        "iv_skew": skew_df,
+        "iv_skew_expiry": "202609",
+        "iv_term": iv_term,
+        "futures_term": futures_term,
+        "futures_underlying": underlying,
     }
     return metrics, series
 
@@ -119,11 +142,11 @@ def test_build_fetch_failure_shows_warning(tmp_path, monkeypatch):
     assert "timeout" in html
 
 
-def test_build_contains_four_charts(tmp_path, monkeypatch):
+def test_build_contains_seven_charts(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "DOCS", tmp_path)
     metrics, series = _build_inputs()
     build(metrics, series)
 
     html = (tmp_path / "index.html").read_text(encoding="utf-8")
-    # Plotly は各チャートに Plotly.newPlot を生成する
-    assert html.count("Plotly.newPlot") >= 4
+    # 既存4チャート + 新規3チャート（スキュー・IV期間構造・先物期間構造）
+    assert html.count("Plotly.newPlot") >= 7

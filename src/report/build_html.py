@@ -46,6 +46,9 @@ def build(metrics: dict, series: dict) -> None:
         "hv": _chart_hv(series),
         "vrp": _chart_vrp(series),
         "drawdown": _chart_drawdown(series),
+        "skew": _chart_skew(series),
+        "iv_term": _chart_iv_term(series),
+        "futures_term": _chart_futures_term(series),
     }
 
     env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)), autoescape=False)
@@ -176,4 +179,160 @@ def _chart_drawdown(series: dict) -> str:
     fig.update_layout(**_base_layout(
         f"VI ピークからの位置（直近{cfg.VI_PEAK_LOOKBACK}日最大比, %）"
     ))
+    return _to_div(fig)
+
+
+def _empty_chart(title: str) -> str:
+    """データなし時のプレースホルダチャートを返す。"""
+    fig = go.Figure()
+    fig.add_annotation(
+        text="データなし", x=0.5, y=0.5,
+        xref="paper", yref="paper",
+        showarrow=False,
+        font=dict(size=16, color="#9E9E9E"),
+    )
+    fig.update_layout(**_base_layout(title))
+    return _to_div(fig)
+
+
+def _chart_skew(series: dict) -> str:
+    """IV スキューチャート（Put/Call 2本色分け、異常値淡色表示）。
+
+    設計根拠: OTM プットのプレミアム割高（プットスキュー）を直接視覚化するため、
+    Put と Call を別系列として描画する。OTM ブレンド単曲線は市場の非対称性を隠蔽する。
+    """
+    skew_df = series.get("iv_skew")
+    if skew_df is None or (hasattr(skew_df, "empty") and skew_df.empty):
+        return _empty_chart("IVスキュー（データなし）")
+
+    expiry = series.get("iv_skew_expiry", "")
+    title_exp = f"{expiry[:4]}/{expiry[4:]}" if len(expiry) == 6 else expiry
+
+    fig = go.Figure()
+
+    # --- Put 系列 ---
+    normal_put = skew_df[~skew_df["outlier_put"].fillna(False)]
+    outlier_put = skew_df[skew_df["outlier_put"].fillna(False)]
+
+    if not normal_put.empty:
+        fig.add_trace(go.Scatter(
+            x=normal_put["moneyness"].tolist(),
+            y=normal_put["iv_put"].tolist(),
+            name="Put IV", mode="lines+markers",
+            line=dict(color="#1565C0", width=2.0),
+            marker=dict(size=5),
+        ))
+    if not outlier_put.empty:
+        fig.add_trace(go.Scatter(
+            x=outlier_put["moneyness"].tolist(),
+            y=outlier_put["iv_put"].tolist(),
+            name="Put IV（低流動性）", mode="markers",
+            marker=dict(color="#1565C0", opacity=0.2, size=8, symbol="circle-open"),
+            showlegend=True,
+        ))
+
+    # --- Call 系列 ---
+    normal_call = skew_df[~skew_df["outlier_call"].fillna(False)]
+    outlier_call = skew_df[skew_df["outlier_call"].fillna(False)]
+
+    if not normal_call.empty:
+        fig.add_trace(go.Scatter(
+            x=normal_call["moneyness"].tolist(),
+            y=normal_call["iv_call"].tolist(),
+            name="Call IV", mode="lines+markers",
+            line=dict(color="#F57C00", width=2.0),
+            marker=dict(size=5),
+        ))
+    if not outlier_call.empty:
+        fig.add_trace(go.Scatter(
+            x=outlier_call["moneyness"].tolist(),
+            y=outlier_call["iv_call"].tolist(),
+            name="Call IV（低流動性）", mode="markers",
+            marker=dict(color="#F57C00", opacity=0.2, size=8, symbol="circle-open"),
+            showlegend=True,
+        ))
+
+    fig.add_vline(x=1.0, line_dash="dash", line_color="#9E9E9E", line_width=1,
+                  annotation_text="ATM", annotation_position="top right",
+                  annotation_font_size=10)
+    layout = _base_layout(f"IVスキュー — {title_exp}限月（行使価格モネーネス近似）")
+    layout["xaxis"]["title"] = "モネーネス（行使価格 / 現物終値）"
+    layout["yaxis"]["title"] = "IV（年率%）"
+    fig.update_layout(**layout)
+    return _to_div(fig)
+
+
+def _chart_iv_term(series: dict) -> str:
+    """IV 期間構造チャート（限月別 ATM IV + 日経 VI 参照線）。
+
+    ATM IV 定義: 各限月で原資産価格に最近接ストライクの Call/Put IV の平均値。
+    日経 VI（NVI）を水平線で重ね、スポット VI との乖離を確認できる。
+    """
+    iv_term = series.get("iv_term")
+    if iv_term is None or (hasattr(iv_term, "empty") and iv_term.empty):
+        return _empty_chart("IV 期間構造（データなし）")
+
+    iv_term = iv_term.dropna()
+    expiry_labels = [f"{e[:4]}/{e[4:]}" if len(e) == 6 else e for e in iv_term.index]
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=expiry_labels, y=iv_term.values.tolist(),
+        mode="lines+markers",
+        name="ATM IV（Call/Put 平均）",
+        line=dict(color="#1565C0", width=2.0),
+        marker=dict(size=9, color="#1565C0"),
+    ))
+
+    # 日経 VI 水平線
+    vi_s = series.get("vi")
+    if vi_s is not None and not vi_s.dropna().empty:
+        vi_val = float(vi_s.dropna().iloc[-1])
+        fig.add_hline(
+            y=vi_val, line_dash="dash", line_color="#F57C00", line_width=1.5,
+            annotation_text=f"日経VI (NVI): {vi_val:.1f}%",
+            annotation_position="top left",
+            annotation_font_size=10,
+        )
+
+    layout = _base_layout("IV 期間構造（ATM IV by 限月, 年率%）")
+    layout["xaxis"]["title"] = "限月"
+    layout["yaxis"]["title"] = "ATM IV（年率%）"
+    fig.update_layout(**layout)
+    return _to_div(fig)
+
+
+def _chart_futures_term(series: dict) -> str:
+    """先物期間構造チャート（限月別清算値 + 現物終値参照線）。"""
+    fut_term = series.get("futures_term")
+    if fut_term is None or (hasattr(fut_term, "empty") and fut_term.empty):
+        return _empty_chart("先物期間構造（データなし）")
+
+    fut_term = fut_term.dropna()
+    expiry_labels = [f"{e[:4]}/{e[4:]}" if len(e) == 6 else e for e in fut_term.index]
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=expiry_labels, y=fut_term.values.tolist(),
+        mode="lines+markers",
+        name="先物清算値",
+        line=dict(color="#2E7D32", width=2.0),
+        marker=dict(size=9, color="#2E7D32"),
+    ))
+
+    # 現物終値水平線
+    fut_underlying = series.get("futures_underlying")
+    if fut_underlying is not None and not (isinstance(fut_underlying, float) and math.isnan(fut_underlying)):
+        fig.add_hline(
+            y=fut_underlying, line_dash="solid", line_color="#555", line_width=1,
+            annotation_text=f"現物終値: {fut_underlying:,.0f}円",
+            annotation_position="top left",
+            annotation_font_size=10,
+        )
+
+    layout = _base_layout("先物期間構造（限月別清算値, 円）")
+    layout["xaxis"]["title"] = "限月"
+    layout["yaxis"]["title"] = "清算値段（円）"
+    layout["yaxis"]["tickformat"] = ","
+    fig.update_layout(**layout)
     return _to_div(fig)
