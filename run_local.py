@@ -156,7 +156,7 @@ def main() -> int:
         front_exp = ""
         option_data_date = "N/A"
         iv_slope = {
-            "slope": float("nan"), "front_iv": float("nan"),
+            "ts_near_minus_far": float("nan"), "front_iv": float("nan"),
             "far_iv": float("nan"), "front_expiry": "", "far_expiry": "",
         }
         skew_futures_price = float("nan")

@@ -311,8 +311,8 @@
 
     <div class="card">
       <div class="label">IV 期間スロープ（期近 − 3M）</div>
-      <div class="value {% if metrics.iv_term_slope.slope is number and metrics.iv_term_slope.slope >= 0 %}vrp-pos{% else %}vrp-neg{% endif %}">
-        {{ metrics.iv_term_slope.slope | fmt("+.1f") }}<span class="unit">pt</span>
+      <div class="value {% if metrics.iv_term_slope.ts_near_minus_far is number and metrics.iv_term_slope.ts_near_minus_far >= 0 %}vrp-pos{% else %}vrp-neg{% endif %}">
+        {{ metrics.iv_term_slope.ts_near_minus_far | fmt("+.1f") }}<span class="unit">pt</span>
       </div>
       <div class="sub">
         {% if metrics.option_data_ok and metrics.iv_term_slope.front_expiry %}

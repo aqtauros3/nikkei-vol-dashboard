@@ -323,7 +323,7 @@ def iv_term_slope(df: pd.DataFrame) -> dict:
             far_expiry   : str
     """
     _NAN: dict = {
-        "slope": float("nan"),
+        "ts_near_minus_far": float("nan"),
         "front_iv": float("nan"),
         "far_iv": float("nan"),
         "front_expiry": "",
@@ -362,7 +362,7 @@ def iv_term_slope(df: pd.DataFrame) -> dict:
         return _NAN
 
     return {
-        "slope": front_iv_val - far_iv_val,
+        "ts_near_minus_far": front_iv_val - far_iv_val,
         "front_iv": front_iv_val,
         "far_iv": far_iv_val,
         "front_expiry": front_expiry,

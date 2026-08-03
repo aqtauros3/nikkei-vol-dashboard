@@ -64,7 +64,7 @@ def _build_inputs(regime: str = "CALM") -> tuple[dict, dict]:
         "option_data_date": "2024-08-01",
         "option_fetch_errors": [],
         "iv_term_slope": {
-            "slope": -2.0,
+            "ts_near_minus_far": -2.0,
             "front_iv": 22.0,
             "far_iv": 24.0,
             "front_expiry": "202609",

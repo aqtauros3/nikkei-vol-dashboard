@@ -342,7 +342,7 @@ def test_iv_term_slope_returns_finite():
     """2限月以上のデータで有限なスロープが返ること。"""
     df = _make_deriv_df(expiries=["202609", "202612"])
     result = iv_term_slope(df)
-    assert math.isfinite(result["slope"])
+    assert math.isfinite(result["ts_near_minus_far"])
     assert math.isfinite(result["front_iv"])
     assert math.isfinite(result["far_iv"])
 
@@ -365,7 +365,7 @@ def test_iv_term_slope_single_expiry_returns_nan():
     """限月が1つしかない場合は NaN を返すこと。"""
     df = _make_deriv_df(expiries=["202609"])
     result = iv_term_slope(df)
-    assert math.isnan(result["slope"])
+    assert math.isnan(result["ts_near_minus_far"])
     assert result["front_expiry"] == ""
 
 
@@ -374,7 +374,7 @@ def test_iv_term_slope_empty_returns_nan():
     df = _make_deriv_df()
     futs_only = df[df["put_call"].isna()].copy()
     result = iv_term_slope(futs_only)
-    assert math.isnan(result["slope"])
+    assert math.isnan(result["ts_near_minus_far"])
 
 
 def test_iv_term_slope_backwardation():
@@ -388,7 +388,7 @@ def test_iv_term_slope_backwardation():
     """
     df = _make_deriv_df(expiries=["202609", "202612"])
     result = iv_term_slope(df)
-    assert math.isfinite(result["slope"])
+    assert math.isfinite(result["ts_near_minus_far"])
 
 
 # ---------------------------------------------------------------------------
