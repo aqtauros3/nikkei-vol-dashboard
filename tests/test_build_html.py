@@ -70,6 +70,14 @@ def _build_inputs(regime: str = "CALM") -> tuple[dict, dict]:
             "front_expiry": "202609",
             "far_expiry": "202612",
         },
+        "atm_basis": "futures",
+        "wm_spread": {
+            "spread": 3.5,
+            "weekly_expiry": "20260905",
+            "weekly_iv": 25.5,
+            "monthly_expiry": "202609",
+            "monthly_iv": 22.0,
+        },
     }
     series = {
         "vi": vi,

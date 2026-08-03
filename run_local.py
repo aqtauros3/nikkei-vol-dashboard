@@ -133,15 +133,19 @@ def main() -> int:
             fut_underlying = option_metrics.futures_underlying_price(deriv_latest)
             option_data_date = str(deriv_latest["date"].iloc[0])
             iv_slope = option_metrics.iv_term_slope(deriv_latest)
+            # 月次限月で先物なし（現物フォールバック）の限月セット（チャート視覚化用）
+            iv_term_fallback_expiries = option_metrics.get_fallback_expiries(deriv_latest)
+            # ATM IV の判定基準（先物 or 現物フォールバック）
+            atm_basis = "spot" if front_exp in iv_term_fallback_expiries else "futures"
             # 期近限月の先物清算値（スキューチャート横軸基準）
-            # Weekly等で先物なしの場合は現物終値にフォールバック
+            # フォールバック限月では現物終値を使用
             _front_futs = option_metrics.filter_futures(deriv_latest, expiry=front_exp)
             _front_settle = _front_futs["settlement"].dropna()
             skew_futures_price = (
                 float(_front_settle.iloc[0]) if not _front_settle.empty else fut_underlying
             )
-            # 月次限月で先物なし（現物フォールバック）の限月セット（チャート視覚化用）
-            iv_term_fallback_expiries = option_metrics.get_fallback_expiries(deriv_latest)
+            # Weekly−Monthly ATM IV スプレッド（pt）
+            wm_spread = option_metrics.weekly_monthly_atm_spread(deriv_latest)
         except Exception as exc:
             logger.warning("option_metrics 計算エラー: %s", exc)
             option_data_ok = False
@@ -157,6 +161,11 @@ def main() -> int:
         }
         skew_futures_price = float("nan")
         iv_term_fallback_expiries: set[str] = set()
+        atm_basis = "futures"
+        wm_spread: dict = {
+            "spread": float("nan"), "weekly_expiry": "",
+            "weekly_iv": float("nan"), "monthly_expiry": "", "monthly_iv": float("nan"),
+        }
 
     # レジーム
     vi_ma_series = regime.vi_moving_average(vi_series, config.VI_MA_WINDOW)
@@ -182,12 +191,14 @@ def main() -> int:
         "fetch_errors": fetch_errors,
         # JPX オプション由来指標
         "atm_iv": atm_iv_val,
+        "atm_basis": atm_basis,        # "futures" or "spot" (フォールバック)
         "vrp_option": vrp_option,
         "option_data_ok": option_data_ok,
         "option_fetched_today": option_fetched_today,
         "option_data_date": option_data_date,
         "option_fetch_errors": jpx_fetch_errors,
         "iv_term_slope": iv_slope,
+        "wm_spread": wm_spread,        # Weekly−Monthly ATM IV スプレッド
     }
     logger.info(
         "VI=%.2f IVP=%.1f%% IVR=%.1f%% HV_YZ=%.1f%% VRP=%.2f レジーム=%s",

@@ -19,6 +19,8 @@ from src.compute.option_metrics import (
     iv_term_slope,
     iv_term_structure,
     nearest_expiry,
+    nearest_weekly_expiry,
+    weekly_monthly_atm_spread,
 )
 
 
@@ -31,22 +33,35 @@ def _make_deriv_df(
     expiries: list[str] | None = None,
     underlying: float = 38000.0,
     strikes: list[int] | None = None,
+    dte_map: dict[str, int] | None = None,
+    futures_expiries: list[str] | None = None,
 ) -> pd.DataFrame:
     """テスト用のデリバティブ DataFrame を生成する。
 
     先物1行 + 指定限月 × 指定ストライクの Put/Call を作成。
     IV はモネーネスに対してプットスキューを持つシンプルな曲面。
+
+    dte_map: 限月 → DTE の辞書。未指定時はリスト位置で自動割り当て（先頭=40, 他=130）。
+    futures_expiries: 先物行を作成する限月。未指定時は全 expiries 分を作成。
     """
     if expiries is None:
         expiries = ["202609", "202612"]
     if strikes is None:
         strikes = [34000, 36000, 37000, 38000, 39000, 40000, 42000]
+    if futures_expiries is None:
+        futures_expiries = list(expiries)
+
+    def _dte(exp: str, idx: int) -> int:
+        if dte_map and exp in dte_map:
+            return dte_map[exp]
+        return 40 if idx == 0 else 130
 
     rows: list[dict] = []
 
-    # 先物行
-    for exp in expiries:
-        dte = 40 if exp == expiries[0] else 130
+    # 先物行（futures_expiries のみ）
+    for exp in futures_expiries:
+        idx = expiries.index(exp) if exp in expiries else 0
+        dte = _dte(exp, idx)
         rows.append({
             "date": date, "code": f"NK225F{exp}", "name": f"日経225先物 {exp}",
             "put_call": float("nan"), "expiry": exp,
@@ -56,8 +71,8 @@ def _make_deriv_df(
         })
 
     # オプション行（プットスキューあり）
-    for exp in expiries:
-        dte = 40 if exp == expiries[0] else 130
+    for idx, exp in enumerate(expiries):
+        dte = _dte(exp, idx)
         for strike in strikes:
             moneyness = strike / underlying
             # Put IV: OTM プットほど高い（スキュー）
@@ -374,3 +389,96 @@ def test_iv_term_slope_backwardation():
     df = _make_deriv_df(expiries=["202609", "202612"])
     result = iv_term_slope(df)
     assert math.isfinite(result["slope"])
+
+
+# ---------------------------------------------------------------------------
+# nearest_expiry / nearest_weekly_expiry (Phase 2)
+# ---------------------------------------------------------------------------
+
+def test_nearest_expiry_excludes_weekly_by_default():
+    """デフォルト(monthly_only=True)では Weekly（8桁）が除外され月次が返ること。"""
+    # DTE=5の Weeklyと DTE=40の月次を混在させる
+    df = _make_deriv_df(
+        expiries=["20260805", "202609"],
+        dte_map={"20260805": 5, "202609": 40},
+        futures_expiries=["202609"],  # 月次のみ先物あり
+    )
+    exp = nearest_expiry(df)
+    assert exp == "202609"
+    assert len(exp) == 6
+
+
+def test_nearest_expiry_monthly_only_false_picks_weekly():
+    """monthly_only=False にすると DTE 最小の Weekly が選ばれること。"""
+    df = _make_deriv_df(
+        expiries=["20260805", "202609"],
+        dte_map={"20260805": 5, "202609": 40},
+        futures_expiries=["202609"],
+    )
+    exp = nearest_expiry(df, monthly_only=False, min_dte=1)
+    assert exp == "20260805"
+
+
+def test_nearest_expiry_min_dte_floor():
+    """DTE がフロア未満の月次限月はスキップされること。"""
+    # 202608(DTE=3 < 7) / 202609(DTE=40 >= 7)
+    df = _make_deriv_df(
+        expiries=["202608", "202609"],
+        dte_map={"202608": 3, "202609": 40},
+    )
+    exp = nearest_expiry(df, monthly_only=True, min_dte=7)
+    assert exp == "202609"
+
+
+def test_nearest_weekly_expiry_returns_shortest():
+    """Weekly限月が複数ある場合は DTE 最小が返ること。"""
+    df = _make_deriv_df(
+        expiries=["20260805", "20260812", "202609"],
+        dte_map={"20260805": 5, "20260812": 12, "202609": 40},
+        futures_expiries=["202609"],
+    )
+    exp = nearest_weekly_expiry(df)
+    assert exp == "20260805"
+
+
+def test_nearest_weekly_expiry_none_when_absent():
+    """Weekly限月がない場合は None を返すこと。"""
+    df = _make_deriv_df(expiries=["202609", "202612"])
+    assert nearest_weekly_expiry(df) is None
+
+
+# ---------------------------------------------------------------------------
+# weekly_monthly_atm_spread (Phase 2)
+# ---------------------------------------------------------------------------
+
+def test_weekly_monthly_spread_has_required_keys():
+    """weekly_monthly_atm_spread が必要なキーを持つこと。"""
+    df = _make_deriv_df(
+        expiries=["20260805", "202609"],
+        dte_map={"20260805": 5, "202609": 40},
+        futures_expiries=["202609"],
+    )
+    result = weekly_monthly_atm_spread(df)
+    for key in ["spread", "weekly_expiry", "weekly_iv", "monthly_expiry", "monthly_iv"]:
+        assert key in result
+
+
+def test_weekly_monthly_spread_finite_when_both_present():
+    """Weekly・月次両方あるときスプレッドが有限であること。"""
+    df = _make_deriv_df(
+        expiries=["20260805", "202609"],
+        dte_map={"20260805": 5, "202609": 40},
+        futures_expiries=["202609"],
+    )
+    result = weekly_monthly_atm_spread(df)
+    assert math.isfinite(result["spread"])
+    assert result["weekly_expiry"] == "20260805"
+    assert result["monthly_expiry"] == "202609"
+
+
+def test_weekly_monthly_spread_nan_when_no_weekly():
+    """Weekly限月がない場合スプレッドは NaN であること。"""
+    df = _make_deriv_df(expiries=["202609", "202612"])
+    result = weekly_monthly_atm_spread(df)
+    assert math.isnan(result["spread"])
+    assert result["weekly_expiry"] == ""

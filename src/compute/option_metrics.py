@@ -52,22 +52,84 @@ def filter_futures(df: pd.DataFrame, expiry: str | None = None) -> pd.DataFrame:
 # 限月選択
 # ---------------------------------------------------------------------------
 
-def nearest_expiry(df: pd.DataFrame) -> str:
-    """残日数が最短（かつ正）の限月を返す。
+def nearest_expiry(
+    df: pd.DataFrame,
+    monthly_only: bool | None = None,
+    min_dte: int | None = None,
+) -> str:
+    """残日数が最短（かつ >= min_dte）の限月を返す。
 
-    days_to_expiry > 0 のオプション行を対象にする。
-    全行 NaN または該当なしの場合は expiry の最小値（辞書順）で代替。
+    monthly_only=True（デフォルト）: 6桁 YYYYMM の月次限月のみ対象。Weekly（8桁）を除外。
+    min_dte: DTE がこれ未満の限月は除外（直前 SQ 週の急騰 IV を避ける）。
+    該当なしの場合は月次限月（monthly_only=True 時）または全限月の辞書順最小で代替。
     """
+    if monthly_only is None:
+        monthly_only = config.NEAREST_EXPIRY_MONTHLY_ONLY
+    if min_dte is None:
+        min_dte = config.NEAREST_EXPIRY_MIN_DTE
+
     opts = filter_options(df)
-    valid = opts[opts["days_to_expiry"].fillna(0) > 0]
+    if monthly_only:
+        opts = opts[opts["expiry"].astype(str).str.len() == 6]
+
+    valid = opts[opts["days_to_expiry"].fillna(0) >= min_dte]
     if valid.empty:
         # フォールバック: 辞書順最小の限月
         all_expiries = opts["expiry"].dropna().unique()
         if len(all_expiries) == 0:
             raise ValueError("オプション行が存在しません")
         return sorted(all_expiries)[0]
-    min_dte = valid["days_to_expiry"].min()
-    return valid[valid["days_to_expiry"] == min_dte]["expiry"].iloc[0]
+    min_dte_val = valid["days_to_expiry"].min()
+    return valid[valid["days_to_expiry"] == min_dte_val]["expiry"].iloc[0]
+
+
+def nearest_weekly_expiry(df: pd.DataFrame, min_dte: int = 1) -> str | None:
+    """残日数が最短（かつ >= min_dte）の Weekly（8桁 YYYYMMDD）限月を返す。
+
+    Weekly限月が存在しない場合は None。
+    """
+    opts = filter_options(df)
+    weekly = opts[opts["expiry"].astype(str).str.len() == 8]
+    valid = weekly[weekly["days_to_expiry"].fillna(0) >= min_dte]
+    if valid.empty:
+        return None
+    min_dte_val = valid["days_to_expiry"].min()
+    return valid[valid["days_to_expiry"] == min_dte_val]["expiry"].iloc[0]
+
+
+def weekly_monthly_atm_spread(df: pd.DataFrame) -> dict:
+    """期近 Weekly ATM IV と月次 front ATM IV のスプレッド（pt）を返す。
+
+    spread = weekly_atm_iv - monthly_atm_iv
+    正値は Weekly プレミアム（期近緊張）、負値は逆転（通常は稀）。
+    Weekly 限月が存在しない場合は spread=NaN。
+    """
+    monthly_exp = nearest_expiry(df)
+    weekly_exp = nearest_weekly_expiry(df)
+
+    monthly_iv = atm_iv(df, monthly_exp)
+    if weekly_exp is None:
+        return {
+            "spread": float("nan"),
+            "weekly_expiry": "",
+            "weekly_iv": float("nan"),
+            "monthly_expiry": monthly_exp,
+            "monthly_iv": monthly_iv,
+        }
+
+    weekly_iv = atm_iv(df, weekly_exp)
+    spread = (
+        weekly_iv - monthly_iv
+        if math.isfinite(weekly_iv) and math.isfinite(monthly_iv)
+        else float("nan")
+    )
+    return {
+        "spread": spread,
+        "weekly_expiry": weekly_exp,
+        "weekly_iv": weekly_iv,
+        "monthly_expiry": monthly_exp,
+        "monthly_iv": monthly_iv,
+    }
 
 
 # ---------------------------------------------------------------------------

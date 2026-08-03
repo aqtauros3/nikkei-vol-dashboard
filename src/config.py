@@ -59,5 +59,9 @@ ATM_MONEYNESS_BAND      = 0.02           # ±2%
 # IV 異常値フィルタ: ローリング中央値（window=5）からの相対乖離率閾値
 IV_OUTLIER_PCT_THRESH   = 0.30           # ±30%超で淡色表示
 
+# nearest_expiry(): 月次限月のみ選択・最小残存日数フロア
+NEAREST_EXPIRY_MONTHLY_ONLY = True   # True = 6桁限月のみ（Weekly除外）
+NEAREST_EXPIRY_MIN_DTE      = 7      # DTE がこれ未満の限月は除外（直前SQ効果を避ける）
+
 # seed 時の遡り営業日数（JPXは約2ヶ月保持なので60で大半を回収可能）
 SEED_LOOKBACK_BDAYS     = 60
