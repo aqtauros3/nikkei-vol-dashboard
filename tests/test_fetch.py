@@ -98,3 +98,36 @@ def test_load_vi_empty_when_no_csv(tmp_path, monkeypatch):
     s = nikkei_vi.load_vi_history()
     assert s.empty
     assert s.dtype == float
+
+
+def test_append_vi_skips_weekend(tmp_path, monkeypatch):
+    """土曜日は保存されないこと。"""
+    monkeypatch.setattr(cfg, "HISTORY", tmp_path)
+    monkeypatch.setattr(cfg, "VI_CSV", tmp_path / "nikkei_vi.csv")
+
+    saturday = pd.Timestamp("2026-08-01")  # 実際に汚染が起きた日
+    assert saturday.dayofweek == 5  # Saturday
+    nikkei_vi.append_vi(saturday, 29.38)
+
+    s = nikkei_vi.load_vi_history()
+    assert s.empty
+
+
+def test_append_vi_skips_holiday(tmp_path, monkeypatch):
+    """祝日（山の日 2026-08-11）は保存されないこと。"""
+    monkeypatch.setattr(cfg, "HISTORY", tmp_path)
+    monkeypatch.setattr(cfg, "VI_CSV", tmp_path / "nikkei_vi.csv")
+
+    mountain_day = pd.Timestamp("2026-08-11")  # 山の日（火曜・祝日）
+    nikkei_vi.append_vi(mountain_day, 30.0)
+
+    s = nikkei_vi.load_vi_history()
+    assert s.empty
+
+
+def test_is_jbday_known_dates():
+    """is_jbday が土日・祝日を正しく判定すること。"""
+    assert nikkei_vi.is_jbday(pd.Timestamp("2026-08-03"))   # 月曜・平日
+    assert not nikkei_vi.is_jbday(pd.Timestamp("2026-08-01"))  # 土曜
+    assert not nikkei_vi.is_jbday(pd.Timestamp("2026-08-02"))  # 日曜
+    assert not nikkei_vi.is_jbday(pd.Timestamp("2026-08-11"))  # 山の日（祝日）

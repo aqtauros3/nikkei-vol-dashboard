@@ -15,9 +15,11 @@
 """
 from __future__ import annotations
 
+import datetime
 import logging
 import re
 
+import jpholiday
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
@@ -64,6 +66,12 @@ def fetch_vi_latest() -> tuple[pd.Timestamp, float]:
 
 def _today_jst() -> pd.Timestamp:
     return pd.Timestamp.now(tz=config.TIMEZONE).normalize().tz_localize(None)
+
+
+def is_jbday(ts: pd.Timestamp) -> bool:
+    """日本の営業日（祝日除く平日）かどうかを返す。"""
+    d: datetime.date = ts.date() if isinstance(ts, pd.Timestamp) else ts
+    return d.weekday() < 5 and not jpholiday.is_holiday(d)
 
 
 def _parse_vi_float(text: str) -> float:
@@ -171,11 +179,22 @@ def load_vi_history() -> pd.Series:
 
 
 def append_vi(date: pd.Timestamp, value: float) -> None:
-    """data/history/nikkei_vi.csv に 1 行追記（同日は最新値で上書き）。"""
+    """data/history/nikkei_vi.csv に 1 行追記（同日は最新値で上書き）。
+
+    非営業日（土日・祝日）は保存をスキップしてログ警告を出す。
+    手動実行時に週末・祝日の汚染行が混入するのを防ぐ。
+    """
     config.HISTORY.mkdir(parents=True, exist_ok=True)
     path = config.VI_CSV
 
-    new = pd.Series({date.normalize(): value}, name="vi")
+    date = date.normalize()
+    if not is_jbday(date):
+        logger.warning(
+            "append_vi: %s は非営業日のため保存をスキップ（土日・祝日）", date.date()
+        )
+        return
+
+    new = pd.Series({date: value}, name="vi")
     new.index.name = "date"
 
     if path.exists():

@@ -31,6 +31,7 @@ import re
 import time
 from pathlib import Path
 
+import jpholiday
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
@@ -77,11 +78,8 @@ def fetch_derivatives(trade_date: pd.Timestamp | None = None) -> pd.DataFrame:
     if trade_date is None:
         trade_date = pd.Timestamp.now(tz=config.TIMEZONE).normalize().tz_localize(None)
 
-    # 土日は JPX 休場 → 直近営業日（金曜）にロールバック
-    if trade_date.dayofweek >= 5:
-        bdays = pd.bdate_range(end=trade_date - pd.Timedelta(days=1), periods=1)
-        trade_date = bdays[-1]
-        logger.info("非営業日のため直近営業日を使用: %s", trade_date.date())
+    # 土日・祝日は JPX 休場 → 直近営業日にロールバック
+    trade_date = _prev_jbday_if_needed(trade_date)
 
     date_str = trade_date.strftime("%Y-%m-%d")
     yyyymmdd = trade_date.strftime("%Y%m%d")
@@ -138,6 +136,23 @@ def load_derivatives_latest(path: Path | None = None) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # 内部実装
 # ---------------------------------------------------------------------------
+
+def _is_jbday(ts: pd.Timestamp) -> bool:
+    """日本の営業日（祝日除く平日）かどうかを返す。"""
+    import datetime
+    d: datetime.date = ts.date()
+    return d.weekday() < 5 and not jpholiday.is_holiday(d)
+
+
+def _prev_jbday_if_needed(ts: pd.Timestamp) -> pd.Timestamp:
+    """ts が非営業日なら直前の営業日を返す。営業日ならそのまま返す。"""
+    t = ts
+    while not _is_jbday(t):
+        t -= pd.Timedelta(days=1)
+    if t != ts:
+        logger.info("非営業日のため直近営業日を使用: %s → %s", ts.date(), t.date())
+    return t
+
 
 def _resolve_base_url(index_url: str, headers: dict) -> str:
     """index.html から rb*.csv のベースディレクトリ URL を抽出する。"""
