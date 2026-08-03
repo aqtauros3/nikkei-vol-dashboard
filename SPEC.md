@@ -73,8 +73,9 @@ d2 = d1 − σ√T
 
 ```
 IV Rank      = (IV_now − min_{252}) / (max_{252} − min_{252}) × 100
-IV Percentile = #{ IV_t < IV_now : t ∈ 過去252 } / 252 × 100
+IV Percentile = #{ IV_t < IV_now : t ∈ 過去252 } / len(window) × 100
 ```
+- len(window) は実際のデータ数（最大252）。蓄積初期（過去252日未満）は実データ数で除算することで系統的な過小評価を避ける（固定/252分母にしない）。
 - IV Rank はレンジ内の相対位置、IV Percentile は分布内の順位。**スパイクに引っ張られにくいのは Percentile**。
 - **入力データ**：日経VI（またはATM IV）の過去252営業日時系列。J-Quants Standard か日経VIヒストリカルで構築。
 
@@ -96,10 +97,11 @@ IV Percentile = #{ IV_t < IV_now : t ∈ 過去252 } / 252 × 100
 
 | 手法 | 指標 | データ |
 |---|---|---|
-| ATM IV スロープ | `TS = ATM_IV(期先) − ATM_IV(期近)`、または比 `IV2/IV1` | 各限月チェーンからATM IVを算出 |
+| ATM IV スロープ | `TS = ATM_IV(期近) − ATM_IV(期先)`、または比 `IV1/IV2` | 各限月チェーンからATM IVを算出 |
 | VI先物カーブ | 日経平均VI先物の期近/期先の気配差 | VI先物気配（証券会社） |
 
-- `TS>0`＝コンタンゴ（平時、売り環境）、`TS<0`＝バックワーデーション（ストレス、売り回避）。
+- `TS>0`＝バックワーデーション（期近IV高・目先緊張、売り回避）、`TS<0`＝コンタンゴ（平時型、売り環境）。
+- 実装では `slope = front_ATM_IV − far_ATM_IV`（far = 残存暦日が90日に最も近い限月）と定義する（実装仕様セクション参照）。
 
 ---
 
@@ -318,7 +320,7 @@ theoretical    … 理論価格
 underlying     … 原資産価格（現物終値）
 iv             … IV（%年率、例: 22.5）
 rate           … 無リスク金利（%）
-days_to_expiry … 残存日数（営業日）
+days_to_expiry … 残存日数（暦日・JPX提供値）
 ```
 
 upsert: `date + code` を複合キーとして `drop_duplicates(keep="last")`。再実行しても重複しない。
@@ -335,12 +337,13 @@ upsert: `date + code` を複合キーとして `drop_duplicates(keep="last")`。
 
 ### ATM IV 実装
 
-- ATM = `|strike / underlying − 1|` が最小の strike
+- ATM = 同一限月の先物清算値（先物なし限月は現物終値フォールバック）に対して `|strike / 基準価格 − 1|` が最小の strike
 - そのストライクの CAL と PUT の IV の平均（片方のみの場合はその値）
 - IV 期間構造・スロープは **月次スタンダード限月（6桁 YYYYMM）のみ**対象
-- IV スロープ = `front_ATM_IV − far_ATM_IV`（far = DTE が 90 日に最も近い限月）
+- IV スロープ = `front_ATM_IV − far_ATM_IV`（far = DTE（暦日）が 90 日に最も近い限月）
   - 正 = バックワーデーション（期近 IV 高・目先緊張）
   - 負 = コンタンゴ（期近 IV 低・平時型）
+  - ATM 判定: 同一限月の先物清算値基準（SPEC §0準拠）。先物なし限月は現物終値フォールバックし淡色表示
 
 ### 縮退運転の動作仕様
 

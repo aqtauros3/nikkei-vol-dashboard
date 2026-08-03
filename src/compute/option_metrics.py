@@ -11,12 +11,15 @@ put_call の値:
 """
 from __future__ import annotations
 
+import logging
 import math
 
 import numpy as np
 import pandas as pd
 
 from src import config
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -68,26 +71,63 @@ def nearest_expiry(df: pd.DataFrame) -> str:
 
 
 # ---------------------------------------------------------------------------
+# 先物価格ルックアップ（ATM 判定基準）
+# ---------------------------------------------------------------------------
+
+def _futures_price_for_expiry(df: pd.DataFrame, expiry: str) -> float | None:
+    """指定限月に対応する先物清算値を返す。先物行が存在しない場合は None。
+
+    ATM 判定の基準価格として使用する。SPEC §0 に従い、日経225オプションの
+    原資産として先物清算値が現物終値より理論的に正確（配当・金利の推定誤差を回避）。
+    """
+    futs = filter_futures(df, expiry=expiry)
+    valid = futs["settlement"].dropna()
+    if valid.empty:
+        return None
+    return float(valid.iloc[0])
+
+
+def get_fallback_expiries(df: pd.DataFrame) -> set[str]:
+    """月次限月のうち対応先物が存在せず現物終値フォールバックとなる限月セットを返す。
+
+    JPX CSV に先物行がない限月（例: 2027年の四半期外月）を特定する。
+    build_html.py でフォールバック限月を視覚的に区別（淡色表示）するために使用する。
+    """
+    opts = filter_options(df)
+    monthly_expiries = {
+        str(e) for e in opts["expiry"].dropna().unique() if len(str(e)) == 6
+    }
+    return {exp for exp in monthly_expiries if _futures_price_for_expiry(df, exp) is None}
+
+
+# ---------------------------------------------------------------------------
 # ATM IV
 # ---------------------------------------------------------------------------
 
 def atm_iv(df: pd.DataFrame, expiry: str) -> float:
     """指定限月の ATM IV（%）を返す。
 
-    ATM 定義: |strike / underlying - 1| が最小の strike を ATM とし、
-    そのストライクの CAL と PUT の IV の平均を返す。
-    片方しかなければその値を使う。
+    ATM 定義: 同一限月の先物清算値（先物なし限月は現物終値にフォールバック）に
+    最も近い strike を ATM とし、そのストライクの CAL と PUT の IV の平均を返す。
 
-    理由: Put-Call パリティの理論上は同値だが実際には需給乖離がある。
+    先物ベースの理由: SPEC §0 参照。日経225オプションは Black-76 が実務標準。
+    先物が存在しない限月（JPX CSV に先物行がない場合）は警告ログを出して現物で代替。
+    Put-Call パリティの理論上は同値だが実際には需給乖離がある。
     平均を取ることで単側の歪みを中和し、安定した ATM IV を得る。
     """
     opts = filter_options(df, expiry=expiry)
     if opts.empty or opts["underlying"].dropna().empty:
         return float("nan")
 
-    underlying = float(opts["underlying"].dropna().iloc[0])
+    spot = float(opts["underlying"].dropna().iloc[0])
+    ref_price = _futures_price_for_expiry(df, expiry)
+    if ref_price is None:
+        # 対応する先物行が存在しない限月（例: 2027年四半期外月）は現物終値で代替
+        logger.warning("限月 %s: 先物清算値なし → 現物終値 %.0f でATM判定（フォールバック）", expiry, spot)
+        ref_price = spot
+
     opts = opts.copy()
-    opts["moneyness_dist"] = (opts["strike"] / underlying - 1.0).abs()
+    opts["moneyness_dist"] = (opts["strike"] / ref_price - 1.0).abs()
     min_dist = opts["moneyness_dist"].min()
     atm_rows = opts[opts["moneyness_dist"] == min_dist]
 
@@ -103,9 +143,13 @@ def iv_skew_series(df: pd.DataFrame, expiry: str) -> pd.DataFrame:
     """指定限月の IV スキューデータを返す。
 
     戻り値: DataFrame の列は [moneyness, iv_put, iv_call, outlier_put, outlier_call]
-        - moneyness = strike / underlying（1.0 が ATM）
+        - moneyness = strike / 先物清算値（先物なし限月は現物終値にフォールバック）
         - iv_put: PUT の IV（%）、iv_call: CAL の IV（%）
         - outlier_put/call: True = 異常値フラグ（淡色表示の対象）
+
+    軸基準の注記: moneyness の基準価格は対応限月の先物清算値（SPEC §0準拠）。
+    将来、複数限月を1チャートに重ね描きする場合は限月ごとに異なる基準価格が
+    使われるため、共通モネーネス軸での直接比較は不整合が生じる点に注意が必要。
     """
     opts = filter_options(df, expiry=expiry)
     if opts.empty or opts["underlying"].dropna().empty:
@@ -113,9 +157,15 @@ def iv_skew_series(df: pd.DataFrame, expiry: str) -> pd.DataFrame:
             columns=["moneyness", "iv_put", "iv_call", "outlier_put", "outlier_call"]
         )
 
-    underlying = float(opts["underlying"].dropna().iloc[0])
+    spot = float(opts["underlying"].dropna().iloc[0])
+    ref_price = _futures_price_for_expiry(df, expiry)
+    if ref_price is None:
+        logger.warning(
+            "限月 %s: 先物清算値なし → 現物終値 %.0f でモネーネス計算（フォールバック）", expiry, spot
+        )
+        ref_price = spot
     opts = opts.copy()
-    opts["moneyness"] = opts["strike"] / underlying
+    opts["moneyness"] = opts["strike"] / ref_price
 
     puts = (
         opts[opts["put_call"] == "PUT"][["moneyness", "iv"]]
@@ -169,6 +219,8 @@ def iv_term_structure(df: pd.DataFrame) -> pd.Series:
 
     月次スタンダード限月（6桁 YYYYMM）のみを対象とする。
     Weekly オプション（8桁 YYYYMMDD）は残存が短く満期効果で IV が不安定なため除外。
+    ATM 判定は限月別先物清算値ベース（先物なし限月は現物終値フォールバック）。
+    フォールバック限月の識別には get_fallback_expiries() を使用すること。
     """
     opts = filter_options(df)
     expiries = sorted(
@@ -197,9 +249,8 @@ def futures_term_structure(df: pd.DataFrame) -> pd.Series:
 def iv_term_slope(df: pd.DataFrame) -> dict:
     """期近 ATM IV と 3か月先 ATM IV のスロープ（期近 − 3M先, pt）を返す。
 
-    3か月先の選択根拠: 残存日数が 90 日に最も近い限月（期近を除く）。
-    90日 = 標準的な IV カーブの中間点であり、期近との差がバックワーデーション/
-    コンタンゴを端的に示す最小限の比較対象。
+    3か月先の選択根拠: 残存日数（暦日）が 90 日に最も近い限月（期近を除く）。
+    90暦日 ≈ 3暦月。ATM判定は限月別先物清算値ベース（SPEC §0準拠）。
 
     Returns:
         dict with keys:
@@ -238,7 +289,7 @@ def iv_term_slope(df: pd.DataFrame) -> dict:
 
     front_expiry = dte_by_expiry.index[0]
 
-    # 3か月先: 期近を除いた中で DTE が 90 日に最も近い限月
+    # 3か月先: 期近を除いた中で DTE が 90 日（暦日）に最も近い限月
     dte_ex_front = dte_by_expiry.drop(front_expiry)
     far_expiry = (dte_ex_front - 90.0).abs().idxmin()
 

@@ -207,6 +207,10 @@ def _chart_skew(series: dict) -> str:
     設計根拠: OTM プットのプレミアム割高（プットスキュー）を直接視覚化するため、
     Put と Call を別系列として描画する。OTM ブレンド単曲線は市場の非対称性を隠蔽する。
     行使価格補助軸は主軸（モネーネス）の時系列一貫性を保ちつつ実額の直感を補う。
+
+    モネーネス基準・行使価格軸: 期近限月の先物清算値を優先（SPEC §0準拠）。
+    先物なし限月（Weekly等）は現物終値にフォールバック。
+    将来、複数限月を重ね描きする場合は限月ごとに基準価格が異なるため注意。
     """
     skew_df = series.get("iv_skew")
     if skew_df is None or (hasattr(skew_df, "empty") and skew_df.empty):
@@ -214,7 +218,22 @@ def _chart_skew(series: dict) -> str:
 
     expiry = series.get("iv_skew_expiry", "")
     title_exp = f"{expiry[:4]}/{expiry[4:]}" if len(expiry) == 6 else expiry
-    underlying = series.get("futures_underlying", float("nan"))
+
+    # スキュー軸基準: 期近先物清算値を優先、なければ現物終値
+    spot = series.get("futures_underlying", float("nan"))
+    skew_ref = series.get("skew_futures_price", float("nan"))
+    _use_futures = (
+        isinstance(skew_ref, (int, float))
+        and math.isfinite(skew_ref)
+        and abs(skew_ref - spot) > 0.01  # 実質的に先物価格が取得できた場合
+    )
+    underlying = skew_ref if _use_futures else spot
+    _x_label = (
+        f"モネーネス（行使価格 / 先物清算値）"
+        if _use_futures
+        else "モネーネス（行使価格 / 現物終値）"
+    )
+    _strike_axis_label = "行使価格（円, 先物基準）" if _use_futures else "行使価格（円）"
 
     fig = go.Figure()
 
@@ -265,7 +284,7 @@ def _chart_skew(series: dict) -> str:
                   annotation_font_size=10)
 
     layout = _base_layout(f"IVスキュー — {title_exp}限月（行使価格モネーネス近似）")
-    layout["xaxis"]["title"] = "モネーネス（行使価格 / 現物終値）"
+    layout["xaxis"]["title"] = _x_label
     layout["yaxis"]["title"] = "IV（年率%）"
 
     # 行使価格補助軸: 主要モネーネス位置に対応する行使価格実額（参考）
@@ -285,7 +304,7 @@ def _chart_skew(series: dict) -> str:
         layout["xaxis"]["range"] = [_xmin, _xmax]
         layout["margin"]["t"] = 62
         layout["xaxis2"] = dict(
-            title=dict(text="行使価格（円）", font=dict(size=10), standoff=4),
+            title=dict(text=_strike_axis_label, font=dict(size=10), standoff=4),
             overlaying="x",
             side="top",
             tickmode="array",
@@ -312,7 +331,8 @@ def _chart_skew(series: dict) -> str:
 def _chart_iv_term(series: dict) -> str:
     """IV 期間構造チャート（限月別 ATM IV + 日経 VI 参照線）。
 
-    ATM IV 定義: 各限月で原資産価格に最近接ストライクの Call/Put IV の平均値。
+    ATM IV 定義: 各限月で先物清算値（先物なし限月は現物終値）に最近接ストライクの
+    Call/Put IV の平均値。先物なし限月は淡色の開マーカーで区別表示する。
     日経 VI（NVI）を水平線で重ね、スポット VI との乖離を確認できる。
     """
     iv_term = series.get("iv_term")
@@ -320,16 +340,46 @@ def _chart_iv_term(series: dict) -> str:
         return _empty_chart("IV 期間構造（データなし）")
 
     iv_term = iv_term.dropna()
-    expiry_labels = [f"{e[:4]}/{e[4:]}" if len(e) == 6 else e for e in iv_term.index]
+    fallback_exp = series.get("iv_term_fallback_expiries", set())
+
+    # 先物ベース限月とフォールバック限月に分離
+    normal_mask = [e not in fallback_exp for e in iv_term.index]
+    fallback_mask = [e in fallback_exp for e in iv_term.index]
+    iv_normal = iv_term[normal_mask]
+    iv_fallback = iv_term[fallback_mask]
+
+    normal_labels = [f"{e[:4]}/{e[4:]}" if len(e) == 6 else e for e in iv_normal.index]
+    fallback_labels = [f"{e[:4]}/{e[4:]}" if len(e) == 6 else e for e in iv_fallback.index]
+    all_labels = [f"{e[:4]}/{e[4:]}" if len(e) == 6 else e for e in iv_term.index]
 
     fig = go.Figure()
+
+    # 全限月を結ぶ線（先物ベース＋フォールバック通し）
     fig.add_trace(go.Scatter(
-        x=expiry_labels, y=iv_term.values.tolist(),
-        mode="lines+markers",
-        name="ATM IV（Call/Put 平均）",
-        line=dict(color="#1565C0", width=2.0),
-        marker=dict(size=9, color="#1565C0"),
+        x=all_labels, y=iv_term.values.tolist(),
+        mode="lines",
+        line=dict(color="#1565C0", width=1.5),
+        showlegend=False,
+        hoverinfo="skip",
     ))
+
+    # 先物ベース限月: 塗りつぶしマーカー
+    if not iv_normal.empty:
+        fig.add_trace(go.Scatter(
+            x=normal_labels, y=iv_normal.values.tolist(),
+            mode="markers",
+            name="ATM IV（先物基準）",
+            marker=dict(size=9, color="#1565C0"),
+        ))
+
+    # フォールバック限月: 開マーカー＋淡色（先物なし → 現物終値でATM判定）
+    if not iv_fallback.empty:
+        fig.add_trace(go.Scatter(
+            x=fallback_labels, y=iv_fallback.values.tolist(),
+            mode="markers",
+            name="ATM IV（現物基準・先物なし）",
+            marker=dict(size=9, color="#90A4AE", symbol="circle-open", line=dict(width=2)),
+        ))
 
     # 日経 VI 水平線
     vi_s = series.get("vi")
@@ -388,6 +438,7 @@ def _chart_futures_term(series: dict) -> str:
 def _chart_iv_term_zoom(series: dict) -> str:
     """IV 期間構造・期近ズームチャート（前 _FRONT_MONTHS_ZOOM 限月のみ）。
     縦軸をデータ範囲にフィットさせ各点に IV 値ラベルを表示。傾き方向を動的に注記。
+    先物なし限月は開マーカーで区別表示する。
     """
     iv_term = series.get("iv_term")
     if iv_term is None or (hasattr(iv_term, "empty") and iv_term.empty):
@@ -397,6 +448,7 @@ def _chart_iv_term_zoom(series: dict) -> str:
         return _empty_chart("IV 期間構造・期近ズーム（データなし）")
 
     front = iv_term.head(_FRONT_MONTHS_ZOOM)
+    fallback_exp = series.get("iv_term_fallback_expiries", set())
     labels = [f"{e[:4]}/{e[4:]}" if len(e) == 6 else e for e in front.index]
     y_vals = front.values.tolist()
 
@@ -409,16 +461,37 @@ def _chart_iv_term_zoom(series: dict) -> str:
         )
 
     fig = go.Figure()
+
+    # 線で全点をつなぐ（フォールバック混在でも連続線を維持）
     fig.add_trace(go.Scatter(
         x=labels, y=y_vals,
-        mode="lines+markers+text",
-        text=[f"{v:.1f}%" for v in y_vals],
-        textposition="top center",
-        textfont=dict(size=11, color="#1565C0"),
-        name="ATM IV（Call/Put 平均）",
+        mode="lines",
         line=dict(color="#1565C0", width=2.0),
-        marker=dict(size=10, color="#1565C0"),
+        showlegend=False,
+        hoverinfo="skip",
     ))
+
+    # 各点: 先物ベースは塗りつぶし、フォールバックは開マーカー
+    for label, exp, val in zip(labels, front.index, y_vals):
+        is_fallback = exp in fallback_exp
+        fig.add_trace(go.Scatter(
+            x=[label], y=[val],
+            mode="markers+text",
+            text=[f"{val:.1f}%"],
+            textposition="top center",
+            textfont=dict(size=11, color="#90A4AE" if is_fallback else "#1565C0"),
+            showlegend=False,
+            marker=dict(
+                size=10,
+                color="#90A4AE" if is_fallback else "#1565C0",
+                symbol="circle-open" if is_fallback else "circle",
+                line=dict(width=2) if is_fallback else dict(width=0),
+            ),
+            hovertemplate=(
+                f"{label}: {val:.1f}%<br>{'(現物基準・先物なし)' if is_fallback else '(先物基準)'}"
+                "<extra></extra>"
+            ),
+        ))
 
     if _slope_ann:
         fig.add_annotation(

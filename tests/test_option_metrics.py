@@ -14,6 +14,7 @@ from src.compute.option_metrics import (
     filter_options,
     futures_term_structure,
     futures_underlying_price,
+    get_fallback_expiries,
     iv_skew_series,
     iv_term_slope,
     iv_term_structure,
@@ -150,10 +151,15 @@ def test_atm_iv_empty_expiry_returns_nan():
 
 
 def test_atm_iv_uses_call_put_average():
-    """ATM ストライク（38000 = underlying）で Call と Put の IV の平均になること。"""
+    """先物清算値に最近接のストライクで Call/Put IV 平均が返ること。
+
+    A-4修正: ATM判定を現物終値→先物清算値ベースに変更（SPEC §0準拠）。
+    _make_deriv_df の先物 settlement = underlying + dte*0.3 = 38000 + 40*0.3 = 38012。
+    唯一のストライク38000が先物38012の最近傍として選ばれる（|38000/38012-1|=0.03%）。
+    iv_put = 25.0（moneyness=38000/38000=1.0 で計算）、iv_call = 20.0 → 平均 22.5。
+    """
     df = _make_deriv_df(underlying=38000.0, strikes=[38000])
     result = atm_iv(df, "202609")
-    # strike==underlying のとき moneyness==1.0 → iv_put=25.0, iv_call=20.0
     expected = (25.0 + 20.0) / 2.0
     assert abs(result - expected) < 0.1
 
@@ -214,6 +220,27 @@ def test_flag_outliers_nan_series_returns_false():
     iv = pd.Series([float("nan")] * 5)
     flags = _flag_iv_outliers(iv, threshold_pct=0.30)
     assert not flags.any()
+
+
+# ---------------------------------------------------------------------------
+# get_fallback_expiries
+# ---------------------------------------------------------------------------
+
+def test_get_fallback_expiries_empty_when_all_have_futures():
+    """全限月に先物がある場合はフォールバックセットが空であること。"""
+    df = _make_deriv_df(expiries=["202609", "202612"])
+    fallback = get_fallback_expiries(df)
+    assert fallback == set()
+
+
+def test_get_fallback_expiries_detects_missing_futures():
+    """先物行がない限月（オプションのみ）がフォールバックセットに含まれること。"""
+    df = _make_deriv_df(expiries=["202609", "202612"])
+    # 先物行を202609分だけ削除して202612の先物なし状態を模擬
+    df_no_fut_612 = df[~((df["put_call"].isna()) & (df["expiry"] == "202612"))].copy()
+    fallback = get_fallback_expiries(df_no_fut_612)
+    assert "202612" in fallback
+    assert "202609" not in fallback
 
 
 # ---------------------------------------------------------------------------

@@ -133,6 +133,15 @@ def main() -> int:
             fut_underlying = option_metrics.futures_underlying_price(deriv_latest)
             option_data_date = str(deriv_latest["date"].iloc[0])
             iv_slope = option_metrics.iv_term_slope(deriv_latest)
+            # 期近限月の先物清算値（スキューチャート横軸基準）
+            # Weekly等で先物なしの場合は現物終値にフォールバック
+            _front_futs = option_metrics.filter_futures(deriv_latest, expiry=front_exp)
+            _front_settle = _front_futs["settlement"].dropna()
+            skew_futures_price = (
+                float(_front_settle.iloc[0]) if not _front_settle.empty else fut_underlying
+            )
+            # 月次限月で先物なし（現物フォールバック）の限月セット（チャート視覚化用）
+            iv_term_fallback_expiries = option_metrics.get_fallback_expiries(deriv_latest)
         except Exception as exc:
             logger.warning("option_metrics 計算エラー: %s", exc)
             option_data_ok = False
@@ -146,6 +155,8 @@ def main() -> int:
             "slope": float("nan"), "front_iv": float("nan"),
             "far_iv": float("nan"), "front_expiry": "", "far_expiry": "",
         }
+        skew_futures_price = float("nan")
+        iv_term_fallback_expiries: set[str] = set()
 
     # レジーム
     vi_ma_series = regime.vi_moving_average(vi_series, config.VI_MA_WINDOW)
@@ -211,7 +222,9 @@ def main() -> int:
         "iv_skew_expiry": front_exp,
         "iv_term": iv_term_s,
         "futures_term": fut_term_s,
-        "futures_underlying": fut_underlying,
+        "futures_underlying": fut_underlying,          # 現物終値（先物期間構造チャートの参照線）
+        "skew_futures_price": skew_futures_price,     # スキューチャート横軸基準（期近先物清算値）
+        "iv_term_fallback_expiries": iv_term_fallback_expiries,  # 先物なし→現物フォールバック限月
     }
 
     # ------------------------------------------------------------------
