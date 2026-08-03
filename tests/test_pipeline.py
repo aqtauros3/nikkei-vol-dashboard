@@ -68,6 +68,39 @@ def test_regime_flag_unknown_on_nan():
     assert flag == "UNKNOWN"
 
 
+def test_regime_dead_band_forces_neutral():
+    """VI と MA の乖離が不感帯内（2%未満）なら STRESS/CALM にならないこと。"""
+    ma = 30.0
+    vi_just_above = ma * 1.019  # 1.9% 乖離 → 不感帯内
+    # slope が正でも STRESS にならない
+    flag = regime.regime_flag(vi_just_above, ma, slope=0.5, dead_band_pct=0.02)
+    assert flag == "NEUTRAL"
+
+
+def test_regime_outside_dead_band_can_stress():
+    """VI が不感帯超（2%以上）かつ傾き正 → STRESS になること。"""
+    ma = 30.0
+    vi_above = ma * 1.021  # 2.1% 乖離 → 不感帯外
+    flag = regime.regime_flag(vi_above, ma, slope=0.5, dead_band_pct=0.02)
+    assert flag == "STRESS"
+
+
+def test_iv_absolute_level_high():
+    assert regime.iv_absolute_level(75.0) == "HIGH"
+
+
+def test_iv_absolute_level_low():
+    assert regime.iv_absolute_level(20.0) == "LOW"
+
+
+def test_iv_absolute_level_normal():
+    assert regime.iv_absolute_level(50.0) == "NORMAL"
+
+
+def test_iv_absolute_level_nan():
+    assert regime.iv_absolute_level(float("nan")) == "UNKNOWN"
+
+
 # ---------- 縮退運転: fetch 失敗でも compute が通ること ----------
 
 def test_pipeline_compute_without_fetch(tmp_path, monkeypatch):

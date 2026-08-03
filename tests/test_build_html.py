@@ -71,6 +71,7 @@ def _build_inputs(regime: str = "CALM") -> tuple[dict, dict]:
             "far_expiry": "202612",
         },
         "atm_basis": "futures",
+        "iv_abs_level": "HIGH",
         "wm_spread": {
             "spread": 3.5,
             "weekly_expiry": "20260905",

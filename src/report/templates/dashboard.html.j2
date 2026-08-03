@@ -109,6 +109,13 @@
     .regime-unknown { background: #F5F5F5; }
     .regime-unknown .value { color: #757575; }
 
+    /* IV 絶対水準バッジ */
+    .badge { font-size: 0.55em; font-weight: 600; border-radius: 4px; padding: 2px 6px; margin-left: 6px; vertical-align: middle; }
+    .iv-abs-high   { background: #FFCDD2; color: #B71C1C; }
+    .iv-abs-normal { background: #E0E0E0; color: #424242; }
+    .iv-abs-low    { background: #B3E5FC; color: #0277BD; }
+    .iv-abs-unknown{ background: #EEEEEE; color: #757575; }
+
     /* ---- セクションナビ ---- */
     .section-nav {
       display: flex;
@@ -325,15 +332,18 @@
     </div>
 
     <div class="card full regime-{{ metrics.regime | lower }}">
-      <div class="label">レジーム</div>
-      <div class="value">{{ metrics.regime }}</div>
+      <div class="label">レジーム（相対） × IV 水準（絶対）</div>
+      <div class="value">
+        {{ metrics.regime }}
+        <span class="badge iv-abs-{{ metrics.iv_abs_level | lower }}">IV {{ metrics.iv_abs_level }}</span>
+      </div>
       <div class="sub">
-        {% if metrics.regime == "STRESS" %}VI が MA 超 かつ上昇中 → 新規売り回避
-        {% elif metrics.regime == "CALM" %}VI が MA 未満 かつ低下中 → 売り検討
-        {% elif metrics.regime == "NEUTRAL" %}どちらにも分類されない → 監視継続
+        {% if metrics.regime == "STRESS" %}VI が MA を不感帯超で上回り、かつ上昇中 → 新規売り回避
+        {% elif metrics.regime == "CALM" %}VI が MA を不感帯超で下回り、かつ低下中 → 売り検討
+        {% elif metrics.regime == "NEUTRAL" %}MA 付近（不感帯内）または方向感なし → 監視継続
         {% else %}データ不足 → 判定不可
         {% endif %}
-        （閾値は例示）
+        ／ IV HIGH: IVP≥{{ cfg.REGIME_HIGH_IV_THRESHOLD | int }}%、LOW: &lt;30%（閾値は例示）
       </div>
     </div>
 

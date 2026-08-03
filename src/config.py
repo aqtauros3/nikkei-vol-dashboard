@@ -63,5 +63,9 @@ IV_OUTLIER_PCT_THRESH   = 0.30           # ±30%超で淡色表示
 NEAREST_EXPIRY_MONTHLY_ONLY = True   # True = 6桁限月のみ（Weekly除外）
 NEAREST_EXPIRY_MIN_DTE      = 7      # DTE がこれ未満の限月は除外（直前SQ効果を避ける）
 
+# レジーム判定: 不感帯・絶対水準閾値
+REGIME_DEAD_BAND_PCT     = 0.02   # |VI-MA|/MA がこれ未満なら強制 NEUTRAL（誤判定抑制）
+REGIME_HIGH_IV_THRESHOLD = 70.0   # IV Percentile がこれ以上で「高IV水準」バッジを表示（例示）
+
 # seed 時の遡り営業日数（JPXは約2ヶ月保持なので60で大半を回収可能）
 SEED_LOOKBACK_BDAYS     = 60

@@ -176,6 +176,7 @@ def main() -> int:
         else float("nan")
     )
     flag = regime.regime_flag(vi_latest, vi_ma_latest, slope)
+    iv_abs = regime.iv_absolute_level(ivp)
 
     vrp_option = iv_metrics.vrp_proxy(atm_iv_val, hv_primary)
 
@@ -187,6 +188,7 @@ def main() -> int:
         "hv": hv_dict,
         "vrp": vrp,
         "regime": flag,
+        "iv_abs_level": iv_abs,   # "HIGH" / "NORMAL" / "LOW" — 絶対水準（2軸表示用）
         "fetch_ok": len(fetch_errors) == 0,
         "fetch_errors": fetch_errors,
         # JPX オプション由来指標
