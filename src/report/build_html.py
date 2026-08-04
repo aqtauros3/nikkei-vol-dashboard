@@ -287,42 +287,36 @@ def _chart_skew(series: dict) -> str:
     layout["xaxis"]["title"] = _x_label
     layout["yaxis"]["title"] = "IV（年率%）"
 
-    # 行使価格補助軸: 主要モネーネス位置に対応する行使価格実額（参考）
+    # 行使価格ラベル: xref="x"（データ座標）のアノテーションで主軸と確実に位置合わせ
+    # xaxis2 overlaying="x" は tickvals の位置合わせが正確でないため不使用
     if isinstance(underlying, (int, float)) and math.isfinite(underlying) and underlying > 0:
-        _key_m = [0.85, 0.90, 0.95, 1.00, 1.05, 1.10, 1.15]
-        _ticktext = [f"{underlying * m:,.0f}" for m in _key_m]
-        # x 軸レンジをデータから確定し両軸に明示してズレを防ぐ
         _xmin = float(skew_df["moneyness"].min()) - 0.01
         _xmax = float(skew_df["moneyness"].max()) + 0.01
-        # ダミートレースの y に使う代表値（Put/Call IV の平均）
-        _iv_flat = [
-            v for col in ("iv_put", "iv_call")
-            for v in skew_df[col].tolist()
-            if isinstance(v, float) and not math.isnan(v) and v > 0
-        ]
-        _y_dummy = sum(_iv_flat) / len(_iv_flat) if _iv_flat else 25.0
         layout["xaxis"]["range"] = [_xmin, _xmax]
-        layout["margin"]["t"] = 62
-        layout["xaxis2"] = dict(
-            title=dict(text=_strike_axis_label, font=dict(size=10), standoff=4),
-            overlaying="x",
-            side="top",
-            tickmode="array",
-            tickvals=_key_m,
-            ticktext=_ticktext,
-            range=[_xmin, _xmax],
-            showgrid=False,
-            zeroline=False,
-            tickfont=dict(size=9),
+        layout["margin"]["t"] = 72
+
+        _key_m = [0.85, 0.90, 0.95, 1.00, 1.05, 1.10, 1.15]
+        for m in _key_m:
+            if _xmin <= m <= _xmax:
+                fig.add_annotation(
+                    x=m, y=1.0,
+                    xref="x", yref="paper",
+                    text=f"{underlying * m:,.0f}",
+                    showarrow=False,
+                    font=dict(size=9, color="#555"),
+                    yanchor="bottom", xanchor="center",
+                    yshift=4,
+                )
+        # 軸ラベルタイトル（ラベル列の上段）
+        fig.add_annotation(
+            x=0.5, y=1.0,
+            xref="paper", yref="paper",
+            text=_strike_axis_label,
+            showarrow=False,
+            font=dict(size=10, color="#555"),
+            yanchor="bottom", xanchor="center",
+            yshift=28,
         )
-        # Plotly は参照トレースが無い軸を描画しないため、不可視ダミートレースで xaxis2 を有効化
-        fig.add_trace(go.Scatter(
-            x=_key_m, y=[_y_dummy] * len(_key_m),
-            xaxis="x2", yaxis="y",
-            mode="markers",
-            marker=dict(size=1, opacity=0, color="rgba(0,0,0,0)"),
-            showlegend=False, hoverinfo="none", name="",
-        ))
 
     fig.update_layout(**layout)
     return _to_div(fig)
