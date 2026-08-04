@@ -287,20 +287,24 @@ def _chart_skew(series: dict) -> str:
     layout["xaxis"]["title"] = _x_label
     layout["yaxis"]["title"] = "IV（年率%）"
 
-    # 行使価格ラベル: xref="x"（データ座標）のアノテーションで主軸と確実に位置合わせ
-    # xaxis2 overlaying="x" は tickvals の位置合わせが正確でないため不使用
+    # 行使価格ラベル: xref/yref を "domain" に統一してズレを防ぐ
+    # xref="x domain" は [0,1] がプロット領域の左端〜右端に対応する。
+    # x_dom = (m - _xmin) / (_xmax - _xmin) で データ座標 → ドメイン座標 に変換。
+    # これにより参照系の混在（xref="x" + yref="paper"）を避けられる。
     if isinstance(underlying, (int, float)) and math.isfinite(underlying) and underlying > 0:
         _xmin = float(skew_df["moneyness"].min()) - 0.01
         _xmax = float(skew_df["moneyness"].max()) + 0.01
+        _xspan = _xmax - _xmin
         layout["xaxis"]["range"] = [_xmin, _xmax]
         layout["margin"]["t"] = 72
 
         _key_m = [0.85, 0.90, 0.95, 1.00, 1.05, 1.10, 1.15]
         for m in _key_m:
             if _xmin <= m <= _xmax:
+                x_dom = (m - _xmin) / _xspan  # データ座標 → ドメイン [0,1]
                 fig.add_annotation(
-                    x=m, y=1.0,
-                    xref="x", yref="paper",
+                    x=x_dom, y=1.0,
+                    xref="x domain", yref="y domain",
                     text=f"{underlying * m:,.0f}",
                     showarrow=False,
                     font=dict(size=9, color="#555"),
@@ -310,7 +314,7 @@ def _chart_skew(series: dict) -> str:
         # 軸ラベルタイトル（ラベル列の上段）
         fig.add_annotation(
             x=0.5, y=1.0,
-            xref="paper", yref="paper",
+            xref="x domain", yref="y domain",
             text=_strike_axis_label,
             showarrow=False,
             font=dict(size=10, color="#555"),
