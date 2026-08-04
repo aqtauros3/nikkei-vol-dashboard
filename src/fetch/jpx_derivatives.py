@@ -90,6 +90,15 @@ def fetch_derivatives(trade_date: pd.Timestamp | None = None) -> pd.DataFrame:
 
     logger.info("JPX derivatives: %s を取得中 → %s", date_str, file_url)
     resp = _fetch_with_retry(file_url, headers)
+
+    # ファイル名日付の一致検証（リダイレクト等で別日付のファイルを掴まないための保護）
+    actual_url = resp.url
+    if f"rb{yyyymmdd}" not in actual_url:
+        raise RuntimeError(
+            f"JPX CSV ファイル名の日付が一致しません。"
+            f"要求={yyyymmdd}, 取得URL={actual_url}"
+        )
+
     df = _parse_rb_csv(resp.content, date_str)
     logger.info("JPX derivatives: %d 行（日経225フィルタ後）", len(df))
     return df

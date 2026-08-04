@@ -2,12 +2,18 @@
 from __future__ import annotations
 
 import io
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
 
 import src.config as cfg
-from src.fetch.jpx_derivatives import _parse_rb_csv, load_derivatives_latest, upsert_derivatives
+from src.fetch.jpx_derivatives import (
+    _parse_rb_csv,
+    fetch_derivatives,
+    load_derivatives_latest,
+    upsert_derivatives,
+)
 
 # ---------------------------------------------------------------------------
 # モック CSV（CP932 エンコードして使用）
@@ -180,3 +186,40 @@ def test_load_latest_file_not_found(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "JPX_DERIVATIVES_CSV", tmp_path / "no_file.csv")
     df = load_derivatives_latest()
     assert df.empty
+
+
+# ---------------------------------------------------------------------------
+# fetch_derivatives URL 日付検証のテスト
+# ---------------------------------------------------------------------------
+
+def test_fetch_derivatives_url_date_mismatch_raises():
+    """取得 URL のファイル名日付が要求日付と一致しない場合 RuntimeError を送出すること。"""
+    trade_date = pd.Timestamp("2026-07-31")
+
+    mock_resp = MagicMock()
+    mock_resp.url = "https://example.com/some-hash/rb20260730.csv"  # 別日付
+
+    with (
+        patch("src.fetch.jpx_derivatives._resolve_base_url", return_value="https://example.com/some-hash"),
+        patch("src.fetch.jpx_derivatives._fetch_with_retry", return_value=mock_resp),
+    ):
+        with pytest.raises(RuntimeError, match="ファイル名の日付が一致しません"):
+            fetch_derivatives(trade_date=trade_date)
+
+
+def test_fetch_derivatives_url_date_matches():
+    """取得 URL のファイル名日付が要求日付と一致する場合 DataFrame が返ること。"""
+    trade_date = pd.Timestamp("2026-07-31")
+
+    mock_resp = MagicMock()
+    mock_resp.url = "https://example.com/some-hash/rb20260731.csv"
+    mock_resp.content = _MOCK_CSV_BYTES
+
+    with (
+        patch("src.fetch.jpx_derivatives._resolve_base_url", return_value="https://example.com/some-hash"),
+        patch("src.fetch.jpx_derivatives._fetch_with_retry", return_value=mock_resp),
+    ):
+        df = fetch_derivatives(trade_date=trade_date)
+
+    assert not df.empty
+    assert (df["date"] == "2026-07-31").all()
